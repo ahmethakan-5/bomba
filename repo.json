@@ -1,0 +1,8 @@
+{
+  "name": "Bomba",
+  "description": "CloudStream eklenti deposu",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/ahmethakan-5/bomba/builds/plugins.json"
+  ]
+}
