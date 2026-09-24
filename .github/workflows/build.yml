@@ -20,6 +20,7 @@ jobs:
           java-version: '17'
 
       - name: Build Plugins
+        working-directory: ./bombaci
         run: |
           chmod +x gradlew
           ./gradlew make --no-daemon
@@ -27,6 +28,6 @@ jobs:
       - name: Deploy to builds branch
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: build
+          folder: ./bombaci/build
           branch: builds
           commit-message: "auto: build plugins"
