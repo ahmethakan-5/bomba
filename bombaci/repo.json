@@ -3,6 +3,7 @@
     "description": "Türkçe içerikli eklenti havuzu",
     "manifestVersion": 1,
     "pluginLists": [
-      "https://raw.githubusercontent.com/ahmethakan-5/bomba/edit/main/bombaci/repo.json"
+  "https://raw.githubusercontent.com/ahmethakan-5/bomba/edit/main/bombaci/repo.json"
+]
     ]
 }
