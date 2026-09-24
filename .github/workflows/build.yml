@@ -19,19 +19,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Download Gradle Wrapper if missing
-        run: |
-          if [ ! -f "./gradlew" ]; then
-            gradle wrapper
-          fi
-          chmod +x gradlew
-
       - name: Build Plugins
-        run: ./gradlew make --no-daemon
+        working-directory: ./bomba
+        run: |
+          chmod +x gradlew
+          ./gradlew make --no-daemon
 
       - name: Deploy to builds branch
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: build
+          folder: ./bomba/build
           branch: builds
           commit-message: "auto: build plugins"
