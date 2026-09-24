@@ -34,8 +34,7 @@ fun Project.android(configuration: LibraryExtension.() -> Unit) =
 
 subprojects {
     apply(plugin = "com.android.library")
-    apply(plugin = "kotlin-android")
-    apply(plugin = "com.lagradost.cloudstream3.gradle")
+       apply(plugin = "com.lagradost.cloudstream3.gradle")
 
     cloudstream {
         setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/ahmethakan-5/bomba")
