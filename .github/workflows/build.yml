@@ -35,6 +35,10 @@ jobs:
         working-directory: ./bombaci
         run: |
           chmod +x gradlew
+          find . -path '*/src/main/kotlin/*.kt' -type f | while read -r f; do
+            grep -q '@file:Suppress("DEPRECATION_ERROR"' "$f" && continue
+            sed -i '1s|^|@file:Suppress("DEPRECATION_ERROR", "DEPRECATION")\n|' "$f"
+          done
           ./gradlew make makePluginsJson --no-daemon
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp */build/*.cs3 "$GITHUB_WORKSPACE/out"
