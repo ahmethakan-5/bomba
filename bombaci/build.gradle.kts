@@ -27,11 +27,15 @@ allprojects {
 
 fun Project.cloudstream(
     configuration: CloudstreamExtension.() -> Unit
-) = extensions.getByName<CloudstreamExtension>("cloudstream").configuration()
+) = extensions
+    .getByName<CloudstreamExtension>("cloudstream")
+    .configuration()
 
 fun Project.android(
     configuration: BaseExtension.() -> Unit
-) = extensions.getByName<BaseExtension>("android").configuration()
+) = extensions
+    .getByName<BaseExtension>("android")
+    .configuration()
 
 subprojects {
 
@@ -58,28 +62,29 @@ subprojects {
         }
 
         compileOptions {
-            sourceCompatibility = JavaVersion.VERSION_1_8
-            targetCompatibility = JavaVersion.VERSION_1_8
+            sourceCompatibility = JavaVersion.VERSION_11
+            targetCompatibility = JavaVersion.VERSION_11
         }
+    }
 
-        tasks.withType<KotlinJvmCompile> {
-            compilerOptions {
-                jvmTarget.set(JvmTarget.JVM_1_8)
+    tasks.withType<KotlinJvmCompile> {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
 
-                freeCompilerArgs.addAll(
-                    "-Xno-call-assertions",
-                    "-Xno-param-assertions",
-                    "-Xno-receiver-assertions"
-                )
-            }
+            freeCompilerArgs.addAll(
+                "-Xno-call-assertions",
+                "-Xno-param-assertions",
+                "-Xno-receiver-assertions"
+            )
         }
     }
 
     dependencies {
+        val cloudstream by configurations
         val implementation by configurations
 
-        implementation(
-            "com.github.recloudstream.cloudstream:library:-SNAPSHOT"
+        cloudstream(
+            "com.lagradost:cloudstream3:pre-release"
         )
 
         implementation(kotlin("stdlib"))
