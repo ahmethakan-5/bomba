@@ -31,7 +31,7 @@ jobs:
         with:
           packages: platform-tools
 
-      - - name: Build Plugins
+      - name: Build Plugins
         working-directory: ./bombaci
         run: |
           chmod +x gradlew
