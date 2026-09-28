@@ -67,7 +67,7 @@ class CizgiMax : MainAPI() {
         val poster      = fixUrlNull(document.selectFirst("img.series-profile-thumb")?.attr("src")) ?: return null
         val description = document.selectFirst("p#tv-series-desc")?.text()?.trim()
         val tags        = document.select("div.genre-item a").mapNotNull { it.text().trim() }
-        val rating      = document.selectFirst("div.color-imdb")?.text()?.trim()?.toRatingInt()
+        val rating = document.selectFirst("div.color-imdb")?.text()?.trim()
 
 
         val episodes = document.select("div.asisotope div.ajax_post").mapNotNull {
@@ -88,7 +88,7 @@ class CizgiMax : MainAPI() {
             this.posterUrl = poster
             this.plot      = description
             this.tags      = tags
-            this.rating    = rating
+            this.score = Score.from10(rating)
         }
     }
 
