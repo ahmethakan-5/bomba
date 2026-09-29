@@ -12,7 +12,7 @@ oturum.headers.update({"User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWe
 # oturum.cookies.update({"wordpress_logged_in_7e0a80686bffd7035218d41e8240d65f": "keyiflerolsun|1704461004|TJh8nQRYrqZ9xlAyO7rO5QgiqTQiw7op8I6LKkSvytX|0dc654883fad5f0301df32e6465aa676a3f235288dd9c8a73260d9c8a20b19ae"})
 
 oturum.post(
-    url  = "https://www.dizimom.diy/wp-login.php",
+    url  = "https://www.dizimom.help/wp-login.php",
     data = {
         "log"         : "keyiflerolsun",
         "pwd"         : "12345",
