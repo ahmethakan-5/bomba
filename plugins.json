@@ -145,10 +145,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.help&sz=%size%",
-        "fileHash": "sha256-cffc0d21d984a04466016c1247dcd1dc42e0cacc6f15ce524033557b2dbd1eff",
+        "fileHash": "sha256-e475ca775f1fb8f9d66b7b1ef304c6f3cb9346a90465d05f5b637d02a0ab8493",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 27913,
+        "fileSize": 27909,
         "status": 1,
         "language": "tr",
         "authors": [
@@ -164,11 +164,11 @@
         "name": "DiziMom"
     },
     {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=https://dizipa1578.com&sz=%size%",
-        "fileHash": "sha256-7f5ad34bbff26d1f7796fd291cb125473a0d1c749aa9ac4fc6c199bc851a6d97",
+        "iconUrl": "https://www.google.com/s2/favicons?domain=https://dizipa1584.com&sz=%size%",
+        "fileHash": "sha256-055f7a0b8d4b182fe627d53e9813f3a9d931e2f498f173102e3e7defad3aff0d",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 16687,
+        "fileSize": 16690,
         "status": 1,
         "language": "tr",
         "authors": [
