@@ -25,14 +25,15 @@ open class CizgiDuo : ExtractorApi() {
 
         m3uLink = Regex("""video_location":"([^"]+)""").find(encrypted)?.groupValues?.get(1)
 
-        callback(
-            newExtractorLink(
-        source = this.name,
-        name = this.name,
-        url = m3uLink ?: throw ErrorLoadingException("m3u link not found"),
-        type = ExtractorLinkType.M3U8
-    ) {
-        this.referer = url
-        this.quality = Qualities.Unknown.value
+        callback.invoke(
+            ExtractorLink(
+                source  = this.name,
+                name    = this.name,
+                url     = m3uLink ?: throw ErrorLoadingException("m3u link not found"),
+                referer = url,
+                quality = Qualities.Unknown.value,
+                isM3u8  = true
+            )
+        )
     }
 }
