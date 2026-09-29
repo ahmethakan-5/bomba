@@ -43,7 +43,6 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp */build/*.cs3 "$GITHUB_WORKSPACE/out"
           cp build/plugins.json "$GITHUB_WORKSPACE/out"
-          echo '<meta http-equiv="refresh" content="0; url=plugins.json">' > "$GITHUB_WORKSPACE/out/index.html"
 
       - name: Deploy to builds branch
         uses: JamesIves/github-pages-deploy-action@v4
