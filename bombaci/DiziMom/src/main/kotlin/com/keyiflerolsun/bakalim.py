@@ -17,18 +17,18 @@ oturum.post(
         "log"         : "keyiflerolsun",
         "pwd"         : "12345",
         "rememberme"  : "forever",
-        "redirect_to" : "https://www.dizimom.diy",
+        "redirect_to" : "https://www.dizimom.help",
     }
 )
 
-istek  = oturum.get("https://www.dizimom.diy/modern-dogu-masallari-1-sezon-7-bolum-izle/")
+istek  = oturum.get("https://www.dizimom.help/modern-dogu-masallari-1-sezon-7-bolum-izle/")
 konsol.print(istek.url)
 
 secici = Selector(istek.text)
 iframe = secici.css("div.video p iframe::attr(src)").get()
 konsol.print(iframe)
 
-oturum.headers.update({"Referer": "https://www.dizimom.diy/"})
+oturum.headers.update({"Referer": "https://www.dizimom.help/"})
 i_source = oturum.get(iframe).text
 
 be_player = search(r"bePlayer\('([^']+)',\s*'(\{[^\}]+\})'\);", i_source).groups()
