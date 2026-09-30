@@ -17,7 +17,7 @@ class FilmMakinesi : MainAPI() {
     override val hasQuickSearch       = false
     override val supportedTypes       = setOf(TvType.Movie)
 
-    // ! CloudFlare bypass
+    // ! Cloudflare Bypass Ayarları
     override var sequentialMainPage            = true
     override var sequentialMainPageDelay       = 50L
     override var sequentialMainPageScrollDelay = 50L
@@ -38,30 +38,31 @@ class FilmMakinesi : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get("${request.data}${page}").document
-        val home     = document.select("a.item, section#film_posts article, div.tooltip").mapNotNull { it.toSearchResult() }
+        val home     = document.select("a.item, section#film_posts article, div.movie-box, div.poster-box").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst("div.title")?.text()
-            ?: this.selectFirst("h6 a")?.text()
+        val title = this.selectFirst("div.title, h6 a, h2, div.film-title")?.text()?.trim()
             ?: this.attr("data-title").takeIf { it.isNotBlank() }
+            ?: this.selectFirst("img")?.attr("alt")?.trim()
             ?: return null
 
         val href = fixUrlNull(this.attr("href"))
-            ?: fixUrlNull(this.selectFirst("h6 a")?.attr("href"))
-            ?: fixUrlNull(this.selectFirst("a")?.attr("href"))
+            ?: fixUrlNull(this.selectFirst("h6 a, a")?.attr("href"))
             ?: return null
 
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-            ?: fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+            ?: fixUrlNull(this.selectFirst("img")?.attr("src"))
 
-        return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
+        return newMovieSearchResponse(title, href, TvType.Movie) { 
+            this.posterUrl = posterUrl 
+        }
     }
 
     private fun Element.toRecommendResult(): SearchResponse? {
-        val title     = this.select("a").last()?.text() ?: this.selectFirst("div.title")?.text() ?: return null
+        val title     = this.select("a").last()?.text()?.trim() ?: this.selectFirst("div.title")?.text()?.trim() ?: return null
         val href      = fixUrlNull(this.select("a").last()?.attr("href")) ?: fixUrlNull(this.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src")) ?: fixUrlNull(this.selectFirst("img")?.attr("src"))
 
@@ -71,7 +72,7 @@ class FilmMakinesi : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("${mainUrl}/arama/?s=${query}").document
 
-        return document.select("a.item, section#film_posts article").mapNotNull { it.toSearchResult() }
+        return document.select("a.item, section#film_posts article, div.movie-box").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -79,11 +80,11 @@ class FilmMakinesi : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title           = document.selectFirst("div#film_izle h1")?.text()?.trim()
-            ?: document.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster          = fixUrlNull(document.selectFirst("[property='og:image']")?.attr("content"))
-        val description     = document.select("section#film_single article p").last()?.text()?.trim()
-        val tags            = document.selectFirst("dt:contains(Tür:) + dd")?.text()?.split(", ")
+        val title           = document.selectFirst("div#film_izle h1, h1.entry-title, h1")?.text()?.trim() ?: return null
+        val poster          = fixUrlNull(document.selectFirst("meta[property='og:image']")?.attr("content"))
+            ?: fixUrlNull(document.selectFirst("div.poster img")?.attr("src"))
+        val description     = document.select("section#film_single article p, div.entry-content p").last()?.text()?.trim()
+        val tags            = document.selectFirst("dt:contains(Tür:) + dd")?.text()?.split(",")?.map { it.trim() }
         val rating          = document.selectFirst("dt:contains(IMDB Puanı:) + dd")?.text()?.trim()?.toRatingInt()
         val year            = document.selectFirst("dt:contains(Yapım Yılı:) + dd")?.text()?.trim()?.toIntOrNull()
 
@@ -95,7 +96,7 @@ class FilmMakinesi : MainAPI() {
         }
 
         val recommendations = document.select("div.hidden-mobile li, div.film-list a.item").mapNotNull { it.toRecommendResult() }
-        val actors          = document.selectFirst("dt:contains(Oyuncular:) + dd")?.text()?.split(", ")?.map {
+        val actors          = document.selectFirst("dt:contains(Oyuncular:) + dd")?.text()?.split(",")?.map {
             Actor(it.trim())
         }
 
@@ -121,13 +122,24 @@ class FilmMakinesi : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("FLMM", "data » $data")
-        val document      = app.get(data).document
-        val iframeElement = document.selectFirst("div.player-div iframe")
-        val rawIframe     = iframeElement?.attr("data-src") ?: iframeElement?.attr("src") ?: return false
-        val iframe        = fixUrl(rawIframe)
+        val document = app.get(data).document
+
+        // Iframe seçimi esnetildi
+        val iframeElement = document.selectFirst("div.player-div iframe, div#player iframe, iframe[data-src], iframe[src]")
+        val rawIframe = iframeElement?.attr("data-src")?.takeIf { it.isNotBlank() }
+            ?: iframeElement?.attr("src")?.takeIf { it.isNotBlank() }
+            ?: return false
+
+        val iframe = fixUrl(rawIframe)
         Log.d("FLMM", "iframe » $iframe")
 
-        loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
+        // 1. CloudStream'in otomatik extractor yakalamasını dene
+        val loaded = loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
+
+        // 2. Otomatik yakalayamazsa Doğrudan CloseLoad Extractor'ını çalıştır
+        if (!loaded) {
+            CloseLoad().getUrl(iframe, "${mainUrl}/", subtitleCallback, callback)
+        }
 
         return true
     }
