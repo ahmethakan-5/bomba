@@ -13,54 +13,49 @@ class CizgiMax : MainAPI() {
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = true
-    override val supportedTypes       = setOf(TvType.Cartoon, TvType.Anime, TvType.TvSeries)
+    override val supportedTypes       = setOf(TvType.Cartoon)
 
     override val mainPage = mainPageOf(
-        "/yeni-eklenenler/"     to "Yeni Eklenenler",
-        "/diziler/cizgi-film/" to "Çizgi Film",
-        "/diziler/anime/"      to "Anime",
-        "/diziler/dizi/"       to "Dizi",
-        "/film/"               to "Film",
-        "/tur/aksiyon/"        to "Aksiyon",
-        "/tur/komedi/"         to "Komedi",
-        "/tur/macera/"         to "Macera",
-        "/tur/bilim-kurgu/"    to "Bilim Kurgu",
-        "/tur/aile/"           to "Aile"
+        "?orderby=date&order=DESC"                                   to "Son Eklenenler",
+        "?s_type&tur[0]=aile&orderby=date&order=DESC"                to "Aile",
+        "?s_type&tur[0]=aksiyon-macera&orderby=date&order=DESC"      to "Aksyion",
+        "?s_type&tur[0]=animasyon&orderby=date&order=DESC"           to "Animasyon",
+        "?s_type&tur[0]=bilim-kurgu-fantazi&orderby=date&order=DESC" to "Bilim Kurgu",
+        "?s_type&tur[0]=cocuklar&orderby=date&order=DESC"            to "Çocuklar",
+        "?s_type&tur[0]=komedi&orderby=date&order=DESC"              to "Komedi",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) "${mainUrl}${request.data}" else "${mainUrl}${request.data}?page=$page"
-        val document = app.get(url).document
-        val home = document.select("div.film-item, div.slide-item").mapNotNull { it.toSearchResult() }
+        val document = app.get("${mainUrl}/diziler/page/${page}${request.data}").document
+        val home     = document.select("ul.filter-results li").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst("a.film-name, a.slide-name, h2.truncate, h2")?.text()?.trim()
-            ?: this.selectFirst("img")?.attr("alt")?.trim()
-            ?: return null
+        val title     = this.selectFirst("h2.truncate")?.text()?.trim() ?: return null
+        val href      = fixUrlNull(this.selectFirst("div.poster-subject a")?.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(this.selectFirst("div.poster-media img")?.attr("data-src"))
 
-        val href = fixUrlNull(
-            this.selectFirst("a.film-name")?.attr("href")
-                ?: this.selectFirst("a.poster")?.attr("href")
-                ?: this.selectFirst("a.slide-name")?.attr("href")
-                ?: this.selectFirst("a")?.attr("href")
-        ) ?: return null
-
-        val posterUrl = fixUrlNull(
-            this.selectFirst("img")?.attr("src")
-                ?: this.selectFirst("img")?.attr("data-src")
-        )
-
-        return newTvSeriesSearchResponse(title, href, TvType.Cartoon) {
-            this.posterUrl = posterUrl
-        }
+        return newTvSeriesSearchResponse(title, href, TvType.Cartoon) { this.posterUrl = posterUrl }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("${mainUrl}/ara/?q=${query}").document
-        return document.select("div.film-item").mapNotNull { it.toSearchResult() }
+        val response = app.get("${mainUrl}/ajaxservice/index.php?qr=${query}").parsedSafe<SearchResult>()?.data?.result ?: return listOf()
+
+        return response.mapNotNull { result ->
+            if (result.sName.contains(".Bölüm") || result.sName.contains(".Sezon") || result.sName.contains("-Sezon") || result.sName.contains("-izle")) {
+                return@mapNotNull null
+            }
+
+            newTvSeriesSearchResponse(
+                result.sName,
+                fixUrl(result.sLink),
+                TvType.Cartoon
+            ) {
+                this.posterUrl = fixUrlNull(result.sImage)
+            }
+        }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -68,80 +63,44 @@ class CizgiMax : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title = document.selectFirst("h1.page-title, h1.series-title, h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(
-            document.selectFirst("img.series-profile-thumb")?.attr("src")
-                ?: document.selectFirst("div.series-profile-thumb img")?.attr("src")
-                ?: document.selectFirst("div.poster img")?.attr("src")
-        )
-        val description = document.selectFirst("p#tv-series-desc, div.series-summary, div.description")?.text()?.trim()
-        val tags = document.select("div.genre-item a, div.genres a").mapNotNull { it.text().trim() }
-        val rating = document.selectFirst("div.color-imdb, div.rating")?.text()?.trim()?.toRatingInt()
+        val title       = document.selectFirst("h1.page-title")?.text() ?: return null
+        val poster      = fixUrlNull(document.selectFirst("img.series-profile-thumb")?.attr("src")) ?: return null
+        val description = document.selectFirst("p#tv-series-desc")?.text()?.trim()
+        val tags        = document.select("div.genre-item a").mapNotNull { it.text().trim() }
+        val rating      = document.selectFirst("div.color-imdb")?.text()?.trim()?.toRatingInt()
 
-        val episodeElements = document.select("div.asisotope div.ajax_post, div.episode-item, div.film-item, a[href*='-bolum-izle']")
 
-        val episodes = if (episodeElements.isNotEmpty()) {
-            episodeElements.mapNotNull { epEl ->
-                val epHref = fixUrlNull(epEl.attr("href").ifEmpty { epEl.selectFirst("a")?.attr("href") }) ?: return@mapNotNull null
-                val epName = epEl.selectFirst("span.episode-names")?.text()?.trim()
-                    ?: epEl.selectFirst("a.film-name")?.text()?.trim()
-                    ?: epEl.text().trim()
+        val episodes = document.select("div.asisotope div.ajax_post").mapNotNull {
+            val epName     = it.selectFirst("span.episode-names")?.text()?.trim() ?: return@mapNotNull null
+            val epHref     = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
+            val epEpisode  = Regex("""(\d+)\.Bölüm""").find(epName)?.groupValues?.get(1)?.toIntOrNull()
+            val seasonName = it.selectFirst("span.season-name")?.text()?.trim() ?: ""
+            val epSeason   = Regex("""(\d+)\.Sezon""").find(seasonName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
-                val season = Regex("""(?i)(\d+)\s*[-.]?\s*Sezon""").find("$epName $epHref")?.groupValues?.get(1)?.toIntOrNull()
-                    ?: Regex("""(?i)sezon[-_/\s]*(\d+)""").find(epHref)?.groupValues?.get(1)?.toIntOrNull()
-                    ?: 1
-
-                val episode = Regex("""(?i)(\d+)\s*[-.]?\s*Bölüm""").find("$epName $epHref")?.groupValues?.get(1)?.toIntOrNull()
-                    ?: Regex("""(?i)bolum[-_/\s]*(\d+)""").find(epHref)?.groupValues?.get(1)?.toIntOrNull()
-                    ?: Regex("""(?i)Bl\.\s*(\d+)""").find(epName)?.groupValues?.get(1)?.toIntOrNull()
-
-                newEpisode(epHref) {
-                    this.name = epName
-                    this.season = season
-                    this.episode = episode
-                }
+            newEpisode(epHref) {
+                this.name = epName
+                this.season = epSeason
+                this.episode = epEpisode
             }
-        } else {
-            listOf(
-                newEpisode(url) {
-                    this.name = title
-                    this.season = 1
-                    this.episode = 1
-                }
-            )
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.Cartoon, episodes) {
             this.posterUrl = poster
-            this.plot = description
-            this.tags = tags
-            this.rating = rating
+            this.plot      = description
+            this.tags      = tags
+            this.rating    = rating
         }
     }
 
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("CZGM", "data » $data")
         val document = app.get(data).document
 
-        val sources = document.select("ul.linkler li a, ul.linkler li, iframe[src], button[data-frame]")
-        sources.forEach { el ->
-            val iframe = fixUrlNull(
-                el.attr("data-frame")
-                    .ifEmpty { el.attr("data-src") }
-                    .ifEmpty { el.attr("src") }
-                    .ifEmpty { el.selectFirst("a")?.attr("data-frame") }
-                    .ifEmpty { el.selectFirst("iframe")?.attr("src") }
-            ) ?: return@forEach
+        document.select("ul.linkler li").forEach {
+            val iframe = fixUrlNull(it.selectFirst("a")?.attr("data-frame")) ?: return@forEach
+            Log.d("CZGM", "iframe » $iframe")
 
-            if (iframe.startsWith("http")) {
-                Log.d("CZGM", "iframe » $iframe")
-                loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
-            }
+            loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
         }
 
         return true
