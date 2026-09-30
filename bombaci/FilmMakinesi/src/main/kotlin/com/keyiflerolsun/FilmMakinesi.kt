@@ -6,8 +6,6 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 
 class FilmMakinesi : MainAPI() {
     override var mainUrl              = "https://filmmakinesi.to"
@@ -90,15 +88,13 @@ class FilmMakinesi : MainAPI() {
 
         val durationElement = document.select("dt:contains(Film Süresi:) + dd time").attr("datetime")
         val duration        = if (durationElement.startsWith("PT") && durationElement.endsWith("M")) {
-            durationElement.drop(2).dropLast(1).toIntOrNull() ?: 0
+            durationElement.drop(2).dropLast(1).toIntOrNull()
         } else {
-            0
+            null
         }
 
         val recommendations = document.select("div.hidden-mobile li, div.film-list a.item").mapNotNull { it.toRecommendResult() }
-        val actors          = document.selectFirst("dt:contains(Oyuncular:) + dd")?.text()?.split(",")?.map {
-            Actor(it.trim())
-        }
+        val actors          = document.selectFirst("dt:contains(Oyuncular:) + dd")?.text()?.split(",")?.map { Actor(it.trim()) }
 
         val trailer         = fixUrlNull(document.selectXpath("//iframe[@title='Fragman']").attr("data-src"))
 
@@ -110,7 +106,7 @@ class FilmMakinesi : MainAPI() {
             this.rating          = rating
             this.duration        = duration
             this.recommendations = recommendations
-            addActors(actors)
+            this.actors          = actors
             addTrailer(trailer)
         }
     }
@@ -124,7 +120,6 @@ class FilmMakinesi : MainAPI() {
         Log.d("FLMM", "data » $data")
         val document = app.get(data).document
 
-        // Iframe seçimi esnetildi
         val iframeElement = document.selectFirst("div.player-div iframe, div#player iframe, iframe[data-src], iframe[src]")
         val rawIframe = iframeElement?.attr("data-src")?.takeIf { it.isNotBlank() }
             ?: iframeElement?.attr("src")?.takeIf { it.isNotBlank() }
@@ -133,10 +128,8 @@ class FilmMakinesi : MainAPI() {
         val iframe = fixUrl(rawIframe)
         Log.d("FLMM", "iframe » $iframe")
 
-        // 1. CloudStream'in otomatik extractor yakalamasını dene
         val loaded = loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
 
-        // 2. Otomatik yakalayamazsa Doğrudan CloseLoad Extractor'ını çalıştır
         if (!loaded) {
             CloseLoad().getUrl(iframe, "${mainUrl}/", subtitleCallback, callback)
         }
