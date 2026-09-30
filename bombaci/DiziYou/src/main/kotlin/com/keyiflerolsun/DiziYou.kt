@@ -18,43 +18,41 @@ class DiziYou : MainAPI() {
     override val supportedTypes       = setOf(TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Aile"                 to "Aile",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Aksiyon"              to "Aksiyon",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Animasyon"            to "Animasyon",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Belgesel"             to "Belgesel",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Bilim+Kurgu"          to "Bilim Kurgu",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Dram"                 to "Dram",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Fantazi"              to "Fantazi",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Gerilim"              to "Gerilim",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Gizem"                to "Gizem",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Komedi"               to "Komedi",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Korku"                to "Korku",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Macera"               to "Macera",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Sava%C5%9F"           to "Savaş",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Su%C3%A7"             to "Suç",
-        "${mainUrl}/dizi-arsivi/page/SAYFA/?tur=Vah%C5%9Fi+Bat%C4%B1" to "Vahşi Batı"
+        "${mainUrl}/" to "Dizi Arşivi (A-Z)"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url      = request.data.replace("SAYFA", "$page")
-        val document = app.get(url).document
-        val home     = document.select("div.single-item").mapNotNull { it.toMainPageResult() }
+        // Yeni yapıda tüm A-Z dizi listesi tek sayfada bulunduğu için sayfalama iptal edildi
+        if (page > 1) return newHomePageResponse(request.name, emptyList())
+
+        val document = app.get(request.data).document
+        
+        // HTML'deki ul.alphabetical-category-list altındaki li > a etiketlerini çekiyoruz
+        val home = document.select("ul.alphabetical-category-list li a").mapNotNull {
+            val title = it.attr("title").ifEmpty { it.text().trim() }
+            val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+            
+            if (title.isEmpty()) return@mapNotNull null
+
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                // Alfabetik ana sayfada afiş URL'si bulunmuyor
+            }
+        }
 
         return newHomePageResponse(request.name, home)
-    }
-
-    private fun Element.toMainPageResult(): SearchResponse? {
-        val title     = this.selectFirst("div#categorytitle a")?.text() ?: return null
-        val href      = fixUrlNull(this.selectFirst("div#categorytitle a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-
-        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("${mainUrl}/?s=${query}").document
 
-        return document.select("div.incontent div#list-series").mapNotNull { it.toMainPageResult() }
+        // Arama sonuçları sayfa yapısı eski düzeni kullanıyor olabileceği için korunmuştur
+        return document.select("div.incontent div#list-series").mapNotNull {
+            val title     = it.selectFirst("div#categorytitle a")?.text() ?: return@mapNotNull null
+            val href      = fixUrlNull(it.selectFirst("div#categorytitle a")?.attr("href")) ?: return@mapNotNull null
+            val posterUrl = fixUrlNull(it.selectFirst("img")?.attr("src"))
+
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
+        }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
