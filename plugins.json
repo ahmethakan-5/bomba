@@ -23,10 +23,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=belgeselx.com&sz=%size%",
-        "fileHash": "sha256-99ff67853edd58362bd2310399e66629e02a6902c01765fd10bceebbe581acea",
+        "fileHash": "sha256-a6a559b1b97f14a02e864e40a12d6f29363655f92d0c3ff18ad1b0c23fc67206",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 19068,
+        "fileSize": 19254,
         "status": 1,
         "language": "tr",
         "authors": [
