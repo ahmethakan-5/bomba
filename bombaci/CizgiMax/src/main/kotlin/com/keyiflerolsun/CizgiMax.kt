@@ -1,106 +1,178 @@
-// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+package com.cizgimax
 
-package com.keyiflerolsun
-
-import android.util.Log
-import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 
 class CizgiMax : MainAPI() {
-    override var mainUrl              = "https://cizgimax.online"
-    override var name                 = "CizgiMax"
-    override val hasMainPage          = true
-    override var lang                 = "tr"
-    override val hasQuickSearch       = true
-    override val supportedTypes       = setOf(TvType.Cartoon)
-
-    override val mainPage = mainPageOf(
-        "?orderby=date&order=DESC"                                   to "Son Eklenenler",
-        "?s_type&tur[0]=aile&orderby=date&order=DESC"                to "Aile",
-        "?s_type&tur[0]=aksiyon-macera&orderby=date&order=DESC"      to "Aksyion",
-        "?s_type&tur[0]=animasyon&orderby=date&order=DESC"           to "Animasyon",
-        "?s_type&tur[0]=bilim-kurgu-fantazi&orderby=date&order=DESC" to "Bilim Kurgu",
-        "?s_type&tur[0]=cocuklar&orderby=date&order=DESC"            to "Çocuklar",
-        "?s_type&tur[0]=komedi&orderby=date&order=DESC"              to "Komedi",
+    override var mainUrl = "https://cizgimax.online"
+    override var name = "ÇizgiMax"
+    override var lang = "tr"
+    override val hasMainPage = true
+    override val hasChromecastSupport = true
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(
+        TvType.Anime,
+        TvType.Cartoon,
+        TvType.TvSeries,
+        TvType.Movie
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("${mainUrl}/diziler/page/${page}${request.data}").document
-        val home     = document.select("ul.filter-results li").mapNotNull { it.toSearchResult() }
+    override val mainPage = mainPageOf(
+        "$mainUrl/" to "Ana Sayfa - Son Bölümler",
+        "$mainUrl/diziler/anime/" to "Animeler",
+        "$mainUrl/diziler/cizgi-film/" to "Çizgi Filmler",
+        "$mainUrl/diziler/dizi/" to "Diziler",
+        "$mainUrl/film/" to "Filmler",
+        "$mainUrl/arsiv/?sort=populer&donem=daily" to "Trendler",
+        "$mainUrl/yeni-eklenenler/" to "Yeni Eklenenler"
+    )
 
-        return newHomePageResponse(request.name, home)
+    override suspend fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+        val doc = app.get(request.data).document
+        val homePageList = mutableListOf<HomePageList>()
+
+        // 1. Ana sayfadaki Öne Çıkan Slider Verilerini Çekme
+        if (request.data == "$mainUrl/") {
+            val sliderItems = doc.select(".slider-wrap .swiper-slide").mapNotNull { element ->
+                val title = element.selectFirst("a.slide-name")?.text() ?: return@mapNotNull null
+                val href = element.selectFirst("a.slide-name")?.attr("href") ?: return@mapNotNull null
+                val style = element.attr("style") ?: ""
+                
+                // style="background-image: url('...')" yapısından görsel URL'sini yakalama
+                val posterUrl = Regex("""background-image:\s*url\((?:&quot;\vert{}"\vert{}')?(.*?)(?:&quot;\vert{}"\vert{}')?\);""")
+                    .find(style)?.groupValues?.get(1)
+
+                newAnimeSearchResponse(title, fixUrl(href), TvType.Anime) {
+                    this.posterUrl = posterUrl?.let { fixUrl(it) }
+                }
+            }
+            if (sliderItems.isNotEmpty()) {
+                homePageList.add(HomePageList("Öne Çıkanlar", sliderItems))
+            }
+        }
+
+        // 2. Film/Bölüm Kartlarını Parsing (Son Bölümler & Liste Sayfaları)
+        val items = doc.select(".film-list .film-item, .episodes-block-body .film-item").mapNotNull { element ->
+            element.toSearchResult()
+        }.distinctBy { it.url }
+
+        if (items.isNotEmpty()) {
+            homePageList.add(HomePageList(request.name, items))
+        }
+
+        return newHomePageResponse(homePageList, false)
     }
 
+    // HTML içerisindeki `.film-item` elemanlarını SearchResponse objesine dönüştürme
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("h2.truncate")?.text()?.trim() ?: return null
-        val href      = fixUrlNull(this.selectFirst("div.poster-subject a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("div.poster-media img")?.attr("data-src"))
+        val title = this.selectFirst("a.film-name")?.text() 
+            ?: this.selectFirst(".inner a.poster img")?.attr("alt") 
+            ?: return null
 
-        return newTvSeriesSearchResponse(title, href, TvType.Cartoon) { this.posterUrl = posterUrl }
+        val href = this.selectFirst("a.film-name")?.attr("href")
+            ?: this.selectFirst("a.poster")?.attr("href") 
+            ?: return null
+
+        val poster = this.selectFirst("a.poster img")?.attr("src")
+
+        // Köşe etiketi kontrolü (ANİME, ÇİZGİ, DİZİ, FİLM)
+        val cornerTag = this.selectFirst(".corner-tag")?.text()?.uppercase() ?: ""
+        val type = when {
+            cornerTag.contains("ANİME") -> TvType.Anime
+            cornerTag.contains("ÇİZGİ") -> TvType.Cartoon
+            cornerTag.contains("DİZİ") -> TvType.TvSeries
+            cornerTag.contains("FİLM") -> TvType.Movie
+            else -> TvType.Anime
+        }
+
+        // Bölüm numarası ayrıştırma ("Bl. 26" -> 26)
+        val epText = this.selectFirst(".ep-tag")?.text()?.replace("Bl.", "")?.trim()
+        val epNum = epText?.toIntOrNull()
+
+        return if (type == TvType.Movie) {
+            newMovieSearchResponse(title, fixUrl(href), type) {
+                this.posterUrl = poster?.let { fixUrl(it) }
+            }
+        } else {
+            newAnimeSearchResponse(title, fixUrl(href), type) {
+                this.posterUrl = poster?.let { fixUrl(it) }
+                if (epNum != null) {
+                    addSub(epNum)
+                }
+            }
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val response = app.get("${mainUrl}/ajaxservice/index.php?qr=${query}").parsedSafe<SearchResult>()?.data?.result ?: return listOf()
+        val url = "$mainUrl/ara/?q=$query"
+        val doc = app.get(url).document
 
-        return response.mapNotNull { result ->
-            if (result.sName.contains(".Bölüm") || result.sName.contains(".Sezon") || result.sName.contains("-Sezon") || result.sName.contains("-izle")) {
-                return@mapNotNull null
-            }
-
-            newTvSeriesSearchResponse(
-                result.sName,
-                fixUrl(result.sLink),
-                TvType.Cartoon
-            ) {
-                this.posterUrl = fixUrlNull(result.sImage)
-            }
+        return doc.select(".film-list .film-item, .ss-list .ss-item, .search-suggest-body .film-item").mapNotNull {
+            it.toSearchResult()
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
+    override suspend fun load(url: String): LoadResponse {
+        val doc = app.get(fixUrl(url)).document
 
-    override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+        val title = doc.selectFirst("h1, .anime-title, .title, .phc-title")?.text() ?: "Bilinmeyen Seri"
+        val poster = doc.selectFirst(".poster img, .anime-poster img, .film-item img")?.attr("src")
+        val description = doc.selectFirst(".description, .synopsis, .phc-desc, .summary")?.text()
+        val tags = doc.select(".genres a, .tags a, .tur-list a, .mob-sub-list a").map { it.text() }
 
-        val title       = document.selectFirst("h1.page-title")?.text() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("img.series-profile-thumb")?.attr("src")) ?: return null
-        val description = document.selectFirst("p#tv-series-desc")?.text()?.trim()
-        val tags        = document.select("div.genre-item a").mapNotNull { it.text().trim() }
-        val rating      = document.selectFirst("div.color-imdb")?.text()?.trim()?.toRatingInt()
+        val episodes = mutableListOf<Episode>()
 
-
-        val episodes = document.select("div.asisotope div.ajax_post").mapNotNull {
-            val epName     = it.selectFirst("span.episode-names")?.text()?.trim() ?: return@mapNotNull null
-            val epHref     = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val epEpisode  = Regex("""(\d+)\.Bölüm""").find(epName)?.groupValues?.get(1)?.toIntOrNull()
-            val seasonName = it.selectFirst("span.season-name")?.text()?.trim() ?: ""
-            val epSeason   = Regex("""(\d+)\.Sezon""").find(seasonName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-            newEpisode(epHref) {
-                this.name = epName
-                this.season = epSeason
-                this.episode = epEpisode
+        // Sayfadaki bölüm listesini yakalama
+        val epElements = doc.select(".episodes-list a, .bolumler-listesi a, .ep-item a, .season-episodes a")
+        if (epElements.isNotEmpty()) {
+            epElements.forEachIndexed { index, ep ->
+                val epUrl = ep.attr("href")
+                val epName = ep.text().ifEmpty { "${index + 1}. Bölüm" }
+                episodes.add(
+                    newEpisode(fixUrl(epUrl)) {
+                        this.name = epName
+                        this.episode = index + 1
+                    }
+                )
             }
+        } else {
+            // Eğer doğrudan tek bir bölüm veya film sayfasındaysa
+            episodes.add(
+                newEpisode(fixUrl(url)) {
+                    this.name = title
+                    this.episode = 1
+                }
+            )
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.Cartoon, episodes) {
-            this.posterUrl = poster
-            this.plot      = description
-            this.tags      = tags
-            this.rating    = rating
+        return newTvSeriesLoadResponse(title, fixUrl(url), TvType.Anime, episodes) {
+            this.posterUrl = poster?.let { fixUrl(it) }
+            this.plot = description
+            this.tags = tags
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        Log.d("CZGM", "data » $data")
-        val document = app.get(data).document
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val doc = app.get(data).document
 
-        document.select("ul.linkler li").forEach {
-            val iframe = fixUrlNull(it.selectFirst("a")?.attr("data-frame")) ?: return@forEach
-            Log.d("CZGM", "iframe » $iframe")
-
-            loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
+        // Sayfadaki iframe/player kaynaklarını tarama
+        val iframes = doc.select("iframe[src], .player-container iframe, #player iframe")
+        for (iframe in iframes) {
+            val src = iframe.attr("src")
+            if (src.isNotEmpty()) {
+                val fixedSrc = fixUrl(src)
+                loadExtractor(fixedSrc, data, subtitleCallback, callback)
+            }
         }
 
         return true
