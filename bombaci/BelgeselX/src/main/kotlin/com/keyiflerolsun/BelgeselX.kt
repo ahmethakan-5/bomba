@@ -35,12 +35,14 @@ class BelgeselX : MainAPI() {
         "${mainUrl}/konu/egitim-belgeselleri&page="		 to "Eğitim",
         "${mainUrl}/konu/dunya-belgeselleri&page="		 to "Dünya",
         "${mainUrl}/konu/doga-belgeselleri&page="		 to "Doğa",
+        "${mainUrl}/konu/cizgi-film&page="               to "Çizgi Film",
         "${mainUrl}/konu/bilim-belgeselleri&page="		 to "Bilim"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get("${request.data}${page}").document
-        val home     = document.select("div.gen-movie-contain").mapNotNull { it.toSearchResult() }
+        // Yeni px-yt-grid temasını ve geriye dönük gen-movie-contain temasını kapsar
+        val home     = document.select("div.px-yt-grid > div, div.gen-movie-contain").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
@@ -53,9 +55,14 @@ class BelgeselX : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("h3 a")?.text()?.trim()?.toTitleCase() ?: return null
-        val href      = fixUrlNull(this.selectFirst("h3 a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
+        // Hem eski (gen-) hem yeni (px-) tema seçicilerini dener
+        val titleElem = this.selectFirst("div.px-yt-desc h3") ?: this.selectFirst("h3 a")
+        val hrefElem  = this.selectFirst("div.px-yt-desc a.px-hdr-btn") ?: this.selectFirst("h3 a")
+        val imgElem   = this.selectFirst("img.px-yt-lazy-thumb") ?: this.selectFirst("img")
+
+        val title     = titleElem?.text()?.trim()?.toTitleCase() ?: return null
+        val href      = fixUrlNull(hrefElem?.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(imgElem?.attr("src"))
 
         return newTvSeriesSearchResponse(title, href, TvType.Documentary) { this.posterUrl = posterUrl }
     }
@@ -95,6 +102,7 @@ class BelgeselX : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
+        // Eğer detay sayfası (load) HTML yapısı da "px-" olarak değiştiyse bu kısımların sitenin yeni haline göre uyarlanması gerekebilir.
         val title       = document.selectFirst("h2.gen-title")?.text()?.trim()?.toTitleCase() ?: return null
         val poster      = fixUrlNull(document.selectFirst("div.gen-tv-show-top img")?.attr("src")) ?: return null
         val description = document.selectFirst("div.gen-single-tv-show-info p")?.text()?.trim()
