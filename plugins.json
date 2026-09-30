@@ -145,10 +145,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizimom.help&sz=%size%",
-        "fileHash": "sha256-e475ca775f1fb8f9d66b7b1ef304c6f3cb9346a90465d05f5b637d02a0ab8493",
+        "fileHash": "sha256-87e4525aa11ac1e47d5c82ffc0b7e9bd22d263c1ee13e5e499b5b49a9b4acb97",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 27909,
+        "fileSize": 28599,
         "status": 1,
         "language": "tr",
         "authors": [
