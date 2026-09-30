@@ -25,9 +25,10 @@ open class CloseLoad : ExtractorApi() {
 
         // Alt yazıları çekme
         iSource.document.select("track").forEach {
-            val label = it.attr("label")
-            val src   = fixUrlNull(it.attr("src"))
-            if (!src.isNullOrBlank()) {
+            val label   = it.attr("label")
+            val srcAttr = it.attr("src")
+            if (srcAttr.isNotBlank()) {
+                val src = fixUrl(srcAttr)
                 subtitleCallback.invoke(
                     SubtitleFile(
                         lang = label.ifBlank { "Turkish" },
