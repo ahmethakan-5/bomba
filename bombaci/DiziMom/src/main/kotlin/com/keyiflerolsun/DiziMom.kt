@@ -1,4 +1,5 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+// Güncel site DOM yapısına göre düzenlenmiştir.
 
 package com.keyiflerolsun
 
@@ -14,55 +15,62 @@ class DiziMom : MainAPI() {
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = false
-    override val supportedTypes       = setOf(TvType.TvSeries)
+    override val supportedTypes       = setOf(TvType.TvSeries, TvType.Movie)
 
+    // Ana sayfa bağlantıları dizimom.html.txt menü yapısına göre güncellendi
     override val mainPage = mainPageOf(
-        "${mainUrl}/tum-bolumler/page/"        to "Son Bölümler",
-        "${mainUrl}/yerli-dizi-izle/page/"     to "Yerli Diziler",
-        "${mainUrl}/yabanci-dizi-izle/page/"   to "Yabancı Diziler",
-        "${mainUrl}/tv-programlari-izle/page/" to "TV Programları",
-        // "${mainUrl}/turkce-dublaj-diziler/page/"      to "Dublajlı Diziler",   // ! "Son Bölümler" Ana sayfa yüklenmesini yavaşlattığı için bunlar devre dışı bırakılmıştır..
-        // "${mainUrl}/netflix-dizileri-izle/page/"      to "Netflix Dizileri",
-        // "${mainUrl}/kore-dizileri-izle/page/"         to "Kore Dizileri",
-        // "${mainUrl}/full-hd-hint-dizileri-izle/page/" to "Hint Dizileri",
+        "${mainUrl}/tum-bolumler/page/"             to "Son Bölümler",
+        "${mainUrl}/yabanci-dizi-izle/page/"        to "Yabancı Diziler",
+        "${mainUrl}/yerli-dizi-izle/page/"          to "Yerli Diziler",
+        "${mainUrl}/anime-izle/page/"               to "Animeler",
+        "${mainUrl}/turkce-dublaj-diziler-hd/page/" to "Dublajlı Diziler",
+        "${mainUrl}/netflix-dizileri-izle/page/"    to "Netflix Dizileri",
+        "${mainUrl}/kore-dizileri-izle-hd/page/"    to "Kore Dizileri",
+        "${mainUrl}/full-hd-hint-dizileri-izle/page/" to "Hint Dizileri",
+        "${mainUrl}/pakistan-dizileri-izle/page/"   to "Pakistan Dizileri",
+        "${mainUrl}/tv-programlari-izle/page/"      to "TV Programları"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get("${request.data}${page}/").document
-        val home     = if (request.data.contains("/tum-bolumler/")) {
-            document.select("div.episode-box").mapNotNull { it.sonBolumler() } 
-        } else {
-            document.select("div.single-item").mapNotNull { it.diziler() }
-        }
+        val isSonBolumler = request.data.contains("/tum-bolumler/")
+        
+        val elements = document.select("div.episode-box, div.single-item")
+        val home = elements.mapNotNull { it.toSearchResult(isSonBolumler) }
 
         return newHomePageResponse(request.name, home)
     }
 
-    private suspend fun Element.sonBolumler(): SearchResponse? {
-        val name      = this.selectFirst("div.episode-name a")?.text()?.substringBefore(" izle") ?: return null
-        val title     = name.replace(".Sezon ", "x").replace(".Bölüm", "")
+    // Hem "Son Bölümler" hem de normal dizi kutularını işleyebilen birleştirilmiş ayrıştırıcı
+    private suspend fun Element.toSearchResult(isSonBolumler: Boolean = false): SearchResponse? {
+        val titleElem = this.selectFirst("div.serie-name a, div.categorytitle a, div.episode-name a") ?: return null
+        var title     = titleElem.text().substringBefore(" izle").trim()
+        var href      = fixUrlNull(titleElem.attr("href")) ?: return null
+        
+        // Lazy Load desteği: Öncelikle data-src aranır, yoksa src alınır
+        val imgElem   = this.selectFirst("div.img img, div.cat-img img, div.poster img, a img")
+        val posterUrl = fixUrlNull(imgElem?.attr("data-src")?.ifEmpty { imgElem.attr("src") })
 
-        val epHref   = fixUrlNull(this.selectFirst("div.episode-name a")?.attr("href")) ?: return null
-        val epDoc    = app.get(epHref).document
-        val href     = epDoc.selectFirst("div#benzerli a")?.attr("href") ?: return null
-
-        val posterUrl = fixUrlNull(this.selectFirst("a img")?.attr("src"))
-
-        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
-    }
-
-    private fun Element.diziler(): SearchResponse? {
-        val title     = this.selectFirst("div.categorytitle a")?.text()?.substringBefore(" izle") ?: return null
-        val href      = fixUrlNull(this.selectFirst("div.categorytitle a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("div.cat-img img")?.attr("src"))
+        // "Son Bölümler" ana sayfasından geliyorsa link bölüme gidecektir, dizinin ana linkini bulmak için istek atılır
+        if (isSonBolumler && href.contains("-bolum-")) {
+            title = title.replace(".Sezon ", "x").replace(".Bölüm", "")
+            try {
+                val epDoc = app.get(href).document
+                val showHref = epDoc.selectFirst("div#benzerli a")?.attr("href")
+                if (showHref != null) {
+                    href = fixUrl(showHref)
+                }
+            } catch (e: Exception) {
+                Log.d("DZM", "Ana dizi linki alınamadı: $href")
+            }
+        }
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("${mainUrl}/?s=${query}").document
-
-        return document.select("div.single-item").mapNotNull { it.diziler() }
+        return document.select("div.episode-box, div.single-item").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
