@@ -24,15 +24,21 @@ class DiziBox : MainAPI() {
     override val supportedTypes       = setOf(TvType.TvSeries)
 
     // ! CloudFlare bypass
-    override var sequentialMainPage = true        // * https://recloudstream.github.io/dokka/-cloudstream/com.lagradost.cloudstream3/-main-a-p-i/index.html#-2049735995%2FProperties%2F101969414
-    override var sequentialMainPageDelay       = 50L  // ? 0.05 saniye
-    override var sequentialMainPageScrollDelay = 50L  // ? 0.05 saniye
+    override var sequentialMainPage            = true
+    override var sequentialMainPageDelay       = 50L  // 0.05 saniye
+    override var sequentialMainPageScrollDelay = 50L  // 0.05 saniye
 
     // ! CloudFlare v2
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val interceptor      by lazy { CloudflareInterceptor(cloudflareKiller) }
 
-    class CloudflareInterceptor(private val cloudflareKiller: CloudflareKiller): Interceptor {
+    private val defaultCookies = mapOf(
+        "LockUser"      to "true",
+        "isTrustedUser" to "true",
+        "dbxu"          to "1722403730363"
+    )
+
+    class CloudflareInterceptor(private val cloudflareKiller: CloudflareKiller) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val request  = chain.request()
             val response = chain.proceed(request)
@@ -78,38 +84,46 @@ class DiziBox : MainAPI() {
         val url      = request.data.replace("SAYFA", "$page")
         val document = app.get(
             url,
-            cookies     = mapOf(
-                "LockUser"      to "true",
-                "isTrustedUser" to "true",
-                "dbxu"          to "1722403730363"
-            ),
+            cookies     = defaultCookies,
             interceptor = interceptor
         ).document
-        val home     = document.select("article.detailed-article").mapNotNull { it.toMainPageResult() }
+
+        val home = document.select("article.detailed-article, .article-series-small-grid, article.grid-box, ul.alphabetical-category-list li").mapNotNull { 
+            it.toMainPageResult() 
+        }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toMainPageResult(): SearchResponse? {
-        val title     = this.selectFirst("h3 a")?.text() ?: return null
-        val href      = fixUrlNull(this.selectFirst("h3 a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
+        val linkElem  = this.selectFirst("h3 a, div.post-title a, h2 a, a") ?: return null
+        val title     = linkElem.text().trim().removeSuffix(" izle")
+        val href      = fixUrlNull(linkElem.attr("href")) ?: return null
 
-        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
+        val imgElem   = this.selectFirst("img")
+        val posterUrl = fixUrlNull(
+            imgElem?.attr("data-src") 
+                ?: imgElem?.attr("data-lazy-src") 
+                ?: imgElem?.attr("src")
+        )
+
+        if (title.isEmpty()) return null
+
+        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { 
+            this.posterUrl = posterUrl 
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get(
             "${mainUrl}/?s=${query}",
-            cookies     = mapOf(
-                "LockUser"      to "true",
-                "isTrustedUser" to "true",
-                "dbxu"          to "1722403730363"
-            ),
+            cookies     = defaultCookies,
             interceptor = interceptor
         ).document
 
-        return document.select("article.detailed-article").mapNotNull { it.toMainPageResult() }
+        return document.select("article.detailed-article, .article-series-small-grid, article.grid-box").mapNotNull { 
+            it.toMainPageResult() 
+        }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -117,51 +131,57 @@ class DiziBox : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(
             url,
-            cookies     = mapOf(
-                "LockUser"      to "true",
-                "isTrustedUser" to "true",
-                "dbxu"          to "1722403730363"
-            ),
+            cookies     = defaultCookies,
             interceptor = interceptor
         ).document
 
-        val title       = document.selectFirst("div.tv-overview h1 a")?.text()?.trim() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("div.tv-overview figure img")?.attr("src"))
+        val title       = document.selectFirst("div.tv-overview h1 a, div.tv-overview h1")?.text()?.trim() ?: return null
+        val posterElem  = document.selectFirst("div.tv-overview figure img, div.tv-overview img")
+        val poster      = fixUrlNull(posterElem?.attr("data-src") ?: posterElem?.attr("src"))
         val description = document.selectFirst("div.tv-story p")?.text()?.trim()
         val year        = document.selectFirst("a[href*='/yil/']")?.text()?.trim()?.toIntOrNull()
-        val tags        = document.select("a[href*='/tur/']").map { it.text() }
+        val tags        = document.select("a[href*='/tur/']").map { it.text().trim() }
         val rating      = document.selectFirst("span.label-imdb b")?.text()?.trim()?.toRatingInt()
-        val actors      = document.select("a[href*='/oyuncu/']").map { Actor(it.text()) }
+        val actors      = document.select("a[href*='/oyuncu/']").map { Actor(it.text().trim()) }
         val trailer     = document.selectFirst("div.tv-overview iframe")?.attr("src")
 
         val episodeList = mutableListOf<Episode>()
-        document.select("div#seasons-list a").forEach {
-            val epUrl = fixUrlNull(it.attr("href")) ?: return@forEach
-            val epDoc = app.get(
-                epUrl,
-                cookies     = mapOf(
-                    "LockUser"      to "true",
-                    "isTrustedUser" to "true",
-                    "dbxu"          to "1722403730363"
-                ),
-                interceptor = interceptor
-            ).document
 
-            epDoc.select("article.grid-box").forEach ep@ { epElem ->
-                val epTitle   = epElem.selectFirst("div.post-title a")?.text()?.trim() ?: return@ep
-                val epHref    = fixUrlNull(epElem.selectFirst("div.post-title a")?.attr("href")) ?: return@ep
-                val epSeason  = Regex("""(\d+)\. ?Sezon""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                val epEpisode = Regex("""(\d+)\. ?Bölüm""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull()
+        fun parseEpisodeElement(epElem: Element) {
+            val linkElem  = epElem.selectFirst("div.post-title a, h3 a, a") ?: return
+            val epTitle   = linkElem.text().trim()
+            val epHref    = fixUrlNull(linkElem.attr("href")) ?: return
+            val epSeason  = Regex("""(?i)(\d+)\.\s*Sezon""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            val epEpisode = Regex("""(?i)(\d+)\.\s*Bölüm""").find(epTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-                episodeList.add(newEpisode(epHref) {
-                    this.name = epTitle
-                    this.season = epSeason
-                    this.episode = epEpisode
-                })
+            episodeList.add(newEpisode(epHref) {
+                this.name    = epTitle
+                this.season  = epSeason
+                this.episode = epEpisode
+            })
+        }
+
+        val seasonLinks = document.select("div#seasons-list a")
+        if (seasonLinks.isNotEmpty()) {
+            seasonLinks.forEach { seasonAnchor ->
+                val epUrl = fixUrlNull(seasonAnchor.attr("href")) ?: return@forEach
+                val epDoc = app.get(
+                    epUrl,
+                    cookies     = defaultCookies,
+                    interceptor = interceptor
+                ).document
+
+                epDoc.select("article.grid-box, div.post-title").forEach { epElem ->
+                    parseEpisodeElement(epElem)
+                }
+            }
+        } else {
+            document.select("article.grid-box, div.episode-list a").forEach { epElem ->
+                parseEpisodeElement(epElem)
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList) {
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList.distinctBy { it.data }) {
             this.posterUrl = poster
             this.plot      = description
             this.year      = year
@@ -172,7 +192,7 @@ class DiziBox : MainAPI() {
         }
     }
 
-    private suspend fun iframeDecode(data:String, iframe:String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    private suspend fun iframeDecode(data: String, iframe: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         @Suppress("NAME_SHADOWING") var iframe = iframe
 
         if (iframe.contains("/player/king/king.php")) {
@@ -180,16 +200,12 @@ class DiziBox : MainAPI() {
             val subDoc = app.get(
                 iframe,
                 referer     = data,
-                cookies     = mapOf(
-                    "LockUser"      to "true",
-                    "isTrustedUser" to "true",
-                    "dbxu"          to "1722403730363"
-                ),
+                cookies     = defaultCookies,
                 interceptor = interceptor
             ).document
             val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
 
-            val iDoc          = app.get(subFrame, referer="${mainUrl}/").text
+            val iDoc          = app.get(subFrame, referer = "${mainUrl}/").text
             val cryptData     = Regex("""CryptoJS\.AES\.decrypt\("(.*)","""").find(iDoc)?.groupValues?.get(1) ?: return false
             val cryptPass     = Regex("""","(.*)"\);""").find(iDoc)?.groupValues?.get(1) ?: return false
             val decryptedData = CryptoJS.decrypt(cryptPass, cryptData)
@@ -212,11 +228,7 @@ class DiziBox : MainAPI() {
             var subDoc = app.get(
                 iframe,
                 referer     = data,
-                cookies     = mapOf(
-                    "LockUser"      to "true",
-                    "isTrustedUser" to "true",
-                    "dbxu"          to "1722403730363"
-                ),
+                cookies     = defaultCookies,
                 interceptor = interceptor
             ).document
 
@@ -228,7 +240,6 @@ class DiziBox : MainAPI() {
             }
 
             val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
-
             loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
 
         } else if (iframe.contains("/player/haydi.php")) {
@@ -236,11 +247,7 @@ class DiziBox : MainAPI() {
             var subDoc = app.get(
                 iframe,
                 referer     = data,
-                cookies     = mapOf(
-                    "LockUser"      to "true",
-                    "isTrustedUser" to "true",
-                    "dbxu"          to "1722403730363"
-                ),
+                cookies     = defaultCookies,
                 interceptor = interceptor
             ).document
 
@@ -252,7 +259,6 @@ class DiziBox : MainAPI() {
             }
 
             val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
-
             loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
         }
 
@@ -263,33 +269,28 @@ class DiziBox : MainAPI() {
         Log.d("DZBX", "data » $data")
         val document = app.get(
             data,
-            cookies     = mapOf(
-                "LockUser"      to "true",
-                "isTrustedUser" to "true",
-                "dbxu"          to "1722403730363"
-            ),
+            cookies     = defaultCookies,
             interceptor = interceptor
         ).document
-        var iframe = document.selectFirst("div#video-area iframe")?.attr("src")?: return false
+
+        var iframe = document.selectFirst("div#video-area iframe")?.attr("src") ?: return false
         Log.d("DZBX", "iframe » $iframe")
 
         iframeDecode(data, iframe, subtitleCallback, callback)
 
-        document.select("div.video-toolbar option[value]").forEach {
+        document.select("div.video-toolbar option[value], div.video-toolbar select option").forEach {
             val altLink = it.attr("value")
-            val subDoc  = app.get(
-                altLink,
-                cookies     = mapOf(
-                    "LockUser"      to "true",
-                    "isTrustedUser" to "true",
-                    "dbxu"          to "1722403730363"
-                ),
-                interceptor = interceptor
-            ).document
-            iframe = subDoc.selectFirst("div#video-area iframe")?.attr("src")?: return false
-            Log.d("DZBX", "iframe » $iframe")
+            if (altLink.isNotEmpty() && altLink.startsWith("http")) {
+                val subDoc = app.get(
+                    altLink,
+                    cookies     = defaultCookies,
+                    interceptor = interceptor
+                ).document
+                iframe = subDoc.selectFirst("div#video-area iframe")?.attr("src") ?: return@forEach
+                Log.d("DZBX", "alt iframe » $iframe")
 
-            iframeDecode(data, iframe, subtitleCallback, callback)
+                iframeDecode(data, iframe, subtitleCallback, callback)
+            }
         }
 
         return true
