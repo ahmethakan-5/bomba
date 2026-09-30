@@ -10,7 +10,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 
 class DiziPal : MainAPI() {
-    override var mainUrl              = "https://dizipa1584.com"
+    // Domain dizipal2134.com olarak güncellendi
+    override var mainUrl              = "https://dizipal2134.com"
     override var name                 = "DiziPal"
     override val hasMainPage          = true
     override var lang                 = "tr"
@@ -18,50 +19,34 @@ class DiziPal : MainAPI() {
     override val supportedTypes       = setOf(TvType.TvSeries, TvType.Movie)
 
     // ! CloudFlare bypass
-    override var sequentialMainPage = true        // * https://recloudstream.github.io/dokka/-cloudstream/com.lagradost.cloudstream3/-main-a-p-i/index.html#-2049735995%2FProperties%2F101969414
-    // override var sequentialMainPageDelay       = 250L // ? 0.25 saniye
-    // override var sequentialMainPageScrollDelay = 250L // ? 0.25 saniye
+    override var sequentialMainPage = true
 
+    // Menü bağlantıları HTML yapısına (/platform/ ve /kategori/) göre güncellendi
     override val mainPage = mainPageOf(
         "${mainUrl}/diziler/son-bolumler"                          to "Son Bölümler",
         "${mainUrl}/diziler"                                       to "Yeni Diziler",
         "${mainUrl}/filmler"                                       to "Yeni Filmler",
-        "${mainUrl}/koleksiyon/netflix"                            to "Netflix",
-        "${mainUrl}/koleksiyon/exxen"                              to "Exxen",
-        "${mainUrl}/koleksiyon/blutv"                              to "BluTV",
-        "${mainUrl}/koleksiyon/disney"                             to "Disney+",
-        "${mainUrl}/koleksiyon/amazon-prime"                       to "Amazon Prime",
-        "${mainUrl}/koleksiyon/tod-bein"                           to "TOD (beIN)",
-        "${mainUrl}/koleksiyon/gain"                               to "Gain",
-        "${mainUrl}/tur/mubi"                                      to "Mubi",
-        "${mainUrl}/diziler?kelime=&durum=&tur=26&type=&siralama=" to "Anime",
-        "${mainUrl}/diziler?kelime=&durum=&tur=5&type=&siralama="  to "Bilimkurgu Dizileri",
-        "${mainUrl}/tur/bilimkurgu"                                to "Bilimkurgu Filmleri",
-        "${mainUrl}/diziler?kelime=&durum=&tur=11&type=&siralama=" to "Komedi Dizileri",
-        "${mainUrl}/tur/komedi"                                    to "Komedi Filmleri",
-        "${mainUrl}/diziler?kelime=&durum=&tur=4&type=&siralama="  to "Belgesel Dizileri",
-        "${mainUrl}/tur/belgesel"                                  to "Belgesel Filmleri",
-        "${mainUrl}/diziler?kelime=&durum=&tur=25&type=&siralama=" to "Erotik Diziler",
-        "${mainUrl}/tur/erotik"                                    to "Erotik Filmler",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=1&type=&siralama="  to "Aile",            // ! Fazla kategori olduğu için geç yükleniyor..
-        // "${mainUrl}/diziler?kelime=&durum=&tur=2&type=&siralama="  to "Aksiyon",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=3&type=&siralama="  to "Animasyon",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=4&type=&siralama="  to "Belgesel",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=6&type=&siralama="  to "Biyografi",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=7&type=&siralama="  to "Dram",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=8&type=&siralama="  to "Fantastik",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=9&type=&siralama="  to "Gerilim",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=10&type=&siralama=" to "Gizem",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=12&type=&siralama=" to "Korku",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=13&type=&siralama=" to "Macera",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=14&type=&siralama=" to "Müzik",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=16&type=&siralama=" to "Romantik",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=17&type=&siralama=" to "Savaş",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=24&type=&siralama=" to "Yerli",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=18&type=&siralama=" to "Spor",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=19&type=&siralama=" to "Suç",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=20&type=&siralama=" to "Tarih",
-        // "${mainUrl}/diziler?kelime=&durum=&tur=21&type=&siralama=" to "Western",
+        "${mainUrl}/trend"                                         to "Trend",
+        "${mainUrl}/anime"                                         to "Anime",
+        "${mainUrl}/platform/netflix"                              to "Netflix",
+        "${mainUrl}/platform/exxen"                                to "Exxen",
+        "${mainUrl}/platform/blutv"                                to "BluTV",
+        "${mainUrl}/platform/disney-plus"                          to "Disney+",
+        "${mainUrl}/platform/prime-video"                          to "Amazon Prime",
+        "${mainUrl}/platform/tabii"                                to "Tabii",
+        "${mainUrl}/platform/gain"                                 to "Gain",
+        "${mainUrl}/platform/max"                                  to "Max",
+        "${mainUrl}/platform/paramount-plus"                       to "Paramount+",
+        "${mainUrl}/kategori/bilim-kurgu"                          to "Bilimkurgu",
+        "${mainUrl}/kategori/komedi"                               to "Komedi",
+        "${mainUrl}/kategori/belgesel"                             to "Belgesel",
+        "${mainUrl}/kategori/aksiyon"                              to "Aksiyon",
+        "${mainUrl}/kategori/dram"                                 to "Dram",
+        "${mainUrl}/kategori/gizem"                                to "Gizem",
+        "${mainUrl}/kategori/korku"                                to "Korku",
+        "${mainUrl}/kategori/suc"                                  to "Suç",
+        "${mainUrl}/kategori/gerilim"                              to "Gerilim",
+        "${mainUrl}/kategori/fantastik"                            to "Fantastik"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -71,6 +56,7 @@ class DiziPal : MainAPI() {
         val home     = if (request.data.contains("/diziler/son-bolumler")) {
             document.select("div.episode-item").mapNotNull { it.sonBolumler() } 
         } else {
+            // bakalim_4.py ile doğrulanan aynı seçici (selector) yapısı kullanılıyor
             document.select("article.type2 ul li").mapNotNull { it.diziler() }
         }
 
@@ -234,14 +220,6 @@ class DiziPal : MainAPI() {
                 isM3u8  = true
             )
         )
-
-        // M3u8Helper.generateM3u8(
-        //     source    = this.name,
-        //     name      = this.name,
-        //     streamUrl = m3uLink,
-        //     referer   = "${mainUrl}/"
-        // ).forEach(callback)
-
         return true
     }
 }
