@@ -2,43 +2,48 @@
 
 package com.keyiflerolsun
 
+import android.util.Base64
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import android.util.Base64
-
-private fun getm3uLink(data: String): String {
-    val first  = Base64.decode(data,Base64.DEFAULT).reversedArray()
-    val second = Base64.decode(first, Base64.DEFAULT)
-    val result = second.toString(Charsets.UTF_8).split("|")[1]
-
-    return result
-}
 
 open class CloseLoad : ExtractorApi() {
     override val name            = "CloseLoad"
     override val mainUrl         = "https://closeload.filmmakinesi.to"
     override val requiresReferer = true
 
-    override suspend fun getUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+    override suspend fun getUrl(
+        url: String, 
+        referer: String?, 
+        subtitleCallback: (SubtitleFile) -> Unit, 
+        callback: (ExtractorLink) -> Unit
+    ) {
         val extRef = referer ?: ""
         Log.d("Kekik_${this.name}", "url » $url")
 
         val iSource = app.get(url, referer = extRef)
 
+        // Alt yazıları çekme
         iSource.document.select("track").forEach {
-            subtitleCallback.invoke(
-                SubtitleFile(
-                    lang = it.attr("label"),
-                    url  = fixUrl(it.attr("src"))
+            val label = it.attr("label")
+            val src   = fixUrlNull(it.attr("src"))
+            if (!src.isNullOrBlank()) {
+                subtitleCallback.invoke(
+                    SubtitleFile(
+                        lang = label.ifBlank { "Turkish" },
+                        url  = src
+                    )
                 )
-            )
+            }
         }
 
-        val obfuscatedScript = iSource.document.select("script[type=text/javascript]")[1].data().trim()
-        val rawScript        = getAndUnpack(obfuscatedScript)
-        val (data)           = Regex("""return result\}var .*?=.*?\("(.*?)"\)""").find(rawScript)?.destructured ?: throw ErrorLoadingException("data not found")
-        val m3uLink          = getm3uLink(data)
+        // Base64 kodlu m3u8 bağlantısını bulma ve çözme
+        val base64Match = Regex("""aHR0[0-9a-zA-Z+/=]*""").find(iSource.text)?.value
+            ?: throw ErrorLoadingException("m3u adresi bulunamadı")
+
+        val padding = "=".repeat((4 - base64Match.length % 4) % 4)
+        val m3uLink = String(Base64.decode(base64Match + padding, Base64.DEFAULT), Charsets.UTF_8)
+        
         Log.d("Kekik_${this.name}", "m3uLink » $m3uLink")
 
         callback.invoke(
