@@ -6,12 +6,10 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 
 class IzleAI : MainAPI() {
     override var mainUrl              = "https://selcukflix.com"
-    override var name                 = "720PizleAI"
+    override var name                 = "SelcukFlix"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = true
@@ -24,19 +22,16 @@ class IzleAI : MainAPI() {
     override val mainPage = mainPageOf(
         "${mainUrl}/film-izle"                   to "Son Eklenen Filmler",
         "${mainUrl}/dizi-izle"                   to "Son Eklenen Diziler",
-        "${mainUrl}/kategori/aksiyon-filmleri"     to "Aksiyon Filmleri",
-        "${mainUrl}/kategori/bilim-kurgu-filmleri" to "Bilim Kurgu Filmleri",
-        "${mainUrl}/kategori/komedi-filmleri"      to "Komedi Filmleri",
-        "${mainUrl}/kategori/korku-filmleri"       to "Korku Filmleri",
-        "${mainUrl}/kategori/dram-filmleri"        to "Dram Filmleri"
+        "${mainUrl}/kesfet"                      to "Keşfet",
+        "${mainUrl}/trend"                       to "Trend İçerikler"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page > 1) "${request.data}?page=$page" else request.data
         val document = app.get(url).document
         
-        // Ana sayfadaki film ve dizi kartlarını seçer
-        val home = document.select("div.new-added-list a, article.movie-type-genres li a, div.grid a[href*='/dizi/'], div.grid a[href*='/film/']")
+        // HTML yapısındaki Trend kartları, Bölüm kartları ve Film listesi kartları
+        val home = document.select("div.new-added-list a, article.movie-type-genres li a, div.series-tab-content a, a[href*='/film/'], a[href*='/dizi/']")
             .mapNotNull { it.toSearchResult() }
             .distinctBy { it.url }
 
@@ -44,12 +39,16 @@ class IzleAI : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val href = fixUrlNull(this.attr("href")) ?: return null
+        val rawHref = this.attr("href")
+        if (rawHref.isBlank() || rawHref == "#" || rawHref.contains("/forum/")) return null
         
-        // Film / Dizi Başlığı
-        val title = this.selectFirst("h3")?.text()
-            ?: this.selectFirst("img")?.attr("alt")?.replace(" izle", "")?.replace(" 2026 izle", "")
-            ?: return null
+        val href = fixUrlNull(rawHref) ?: return null
+        
+        // Başlık Ayıklama
+        val title = this.selectFirst("h3")?.text()?.trim()
+            ?: this.selectFirst("img")?.attr("alt")?.replace(" izle", "")?.replace(" 2026 izle", "")?.trim()
+            ?: this.attr("title").replace(" izle", "").trim()
+            if (title.isBlank()) return null
 
         // Poster Görseli
         val posterUrl = fixUrlNull(
@@ -86,8 +85,8 @@ class IzleAI : MainAPI() {
         val veriler = mutableListOf<SearchResponse>()
 
         searchReq?.data?.result?.forEach { searchItem ->
-            val title = searchItem.title ?: return@forEach
-            val slug  = searchItem.slug ?: return@forEach
+            val title = searchItem.title ?: searchItem.name ?: return@forEach
+            val slug  = searchItem.slug ?: searchItem.url ?: return@forEach
             val poster = searchItem.poster
 
             val url = if (slug.startsWith("http")) slug else "${mainUrl}/${slug.removePrefix("/")}"
@@ -135,7 +134,7 @@ class IzleAI : MainAPI() {
         return if (isTv) {
             val episodes = mutableListOf<Episode>()
             
-            // Bölüm listesini DOM üzerinden ayrıştırır
+            // Dizi Bölümleri Ayrıştırma
             document.select("a[href*='/sezon-']").forEach { epAnchor ->
                 val epHref = fixUrlNull(epAnchor.attr("href")) ?: return@forEach
                 val epText = epAnchor.selectFirst("div.text-white")?.text() ?: epAnchor.text()
@@ -176,17 +175,17 @@ class IzleAI : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit, 
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("IzleAI", "data » $data")
+        Log.d("SelcukFlix", "data » $data")
         val document = app.get(data).document
         
-        // Iframe seçici
+        // Iframe / Oyuncu Bağlantısını Ayıklama
         val iframe = fixUrlNull(
             document.selectFirst("iframe[src*='player']")?.attr("src") 
                 ?: document.selectFirst("div.player iframe")?.attr("src")
                 ?: document.selectFirst("iframe")?.attr("src")
         ) ?: return false
 
-        Log.d("IzleAI", "iframe » $iframe")
+        Log.d("SelcukFlix", "iframe » $iframe")
 
         loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
 
