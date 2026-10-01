@@ -86,17 +86,7 @@ class FilmMakinesi : MainAPI() {
         val rating          = document.selectFirst("dt:contains(IMDB Puanı:) + dd")?.text()?.trim()?.toRatingInt()
         val year            = document.selectFirst("dt:contains(Yapım Yılı:) + dd")?.text()?.trim()?.toIntOrNull()
 
-        val durationElement = document.select("dt:contains(Film Süresi:) + dd time").attr("datetime")
-        val duration        = if (durationElement.startsWith("PT") && durationElement.endsWith("M")) {
-            durationElement.drop(2).dropLast(1).toIntOrNull()
-        } else {
-            null
-        }
-
         val recommendations = document.select("div.hidden-mobile li, div.film-list a.item").mapNotNull { it.toRecommendResult() }
-        val actors          = document.selectFirst("dt:contains(Oyuncular:) + dd")?.text()?.split(",")?.map { Actor(it.trim()) }
-
-        val trailer         = fixUrlNull(document.selectXpath("//iframe[@title='Fragman']").attr("data-src"))
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl       = poster
@@ -104,10 +94,7 @@ class FilmMakinesi : MainAPI() {
             this.plot            = description
             this.tags            = tags
             this.rating          = rating
-            this.duration        = duration
             this.recommendations = recommendations
-            this.actors          = actors
-            addTrailer(trailer)
         }
     }
 
