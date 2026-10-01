@@ -1,12 +1,12 @@
-package com.filmmodu
+package com.keyiflerolsun
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
-class FilmmoduProvider : MainAPI() {
+class FilmModu : MainAPI() {
     override var mainUrl = "https://filmmodu.live"
-    override var name = "Filmmodu"
+    override var name = "FilmModu"
     override var hasMainPage = true
     override var lang = "tr"
     override val supportedTypes = setOf(
@@ -22,14 +22,13 @@ class FilmmoduProvider : MainAPI() {
         "$mainUrl/kesfet" to "Keşfet"
     )
 
-    override async fun getMainPage(
+    override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
         val url = if (page > 1) "${request.data}?page=$page" else request.data
         val document = app.get(url).document
 
-        // Poster kartlarını seçmek için güncel CSS seçicileri
         val items = document.select("a[href*=/film/], a[href*=/dizi/], a[href*=/anime/]").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
@@ -45,7 +44,6 @@ class FilmmoduProvider : MainAPI() {
 
         val href = fixUrlNull(this.attr("href")) ?: return null
         
-        // poster görselini alma (img veya storage/tmdb path'lerinden)
         val posterUrl = this.selectFirst("img")?.let { img ->
             img.attr("src").ifEmpty { img.attr("data-src") }
         }
@@ -73,8 +71,7 @@ class FilmmoduProvider : MainAPI() {
         }
     }
 
-    override async fun search(query: String): List<SearchResponse> {
-        // Sitedeki arama endpoint'i schema.org verisine göre: /ara?q={query}
+    override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/ara?q=$query"
         val document = app.get(url).document
 
@@ -83,7 +80,7 @@ class FilmmoduProvider : MainAPI() {
         }.distinctBy { it.url }
     }
 
-    override async fun load(url: String): LoadResponse? {
+    override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
@@ -93,18 +90,18 @@ class FilmmoduProvider : MainAPI() {
             ?: document.selectFirst("p")?.text()
 
         val year = document.selectFirst("a[href*=/yil/]")?.text()?.toIntOrNull()
-        val rating = document.selectFirst(".rating, [class*=score]")?.text()?.findRating()
+        val rating = document.selectFirst(".rating, [class*=score]")?.text()?.let {
+            Regex("""\d+(\.\d+)?""").find(it)?.value?.toIntOrNull()
+        }
 
         val isTv = url.contains("/dizi/") || url.contains("/anime/")
 
         return if (isTv) {
-            // Bölüm listesi çekimi
             val episodes = mutableListOf<Episode>()
             document.select("a[href*=/bolum/]").forEach { ep ->
                 val epHref = fixUrlNull(ep.attr("href")) ?: return@forEach
                 val epName = ep.text().trim()
                 
-                // Sezon / Bölüm numarası ayrıştırma
                 val seasonNum = epHref.substringAfter("sezon-", "").substringBefore("-").toIntOrNull() ?: 1
                 val epNum = epHref.substringAfter("bolum-", "").substringBefore("-").toIntOrNull() ?: 1
 
@@ -134,7 +131,7 @@ class FilmmoduProvider : MainAPI() {
         }
     }
 
-    override async fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -142,7 +139,6 @@ class FilmmoduProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        // Player iframe veya video kaynağını çekme
         document.select("iframe[src]").forEach { iframe ->
             val iframeUrl = fixUrl(iframe.attr("src"))
             loadExtractor(iframeUrl, data, subtitleCallback, callback)
