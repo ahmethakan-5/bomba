@@ -13,46 +13,59 @@ class JetFilmizle : MainAPI() {
     override var name                 = "JetFilmizle"
     override val hasMainPage          = true
     override var lang                 = "tr"
-    override val hasQuickSearch       = false
-    override val supportedTypes       = setOf(TvType.Movie)
+    override val hasQuickSearch       = true
+    override val supportedTypes       = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/page/"                                     to "Son Filmler",
-        "${mainUrl}/netflix/page/"                             to "Netflix",
-        "${mainUrl}/editorun-secimi/page/"                     to "Editörün Seçimi",
-        "${mainUrl}/turk-film-izle/page/"                      to "Türk Filmleri",
-        "${mainUrl}/cizgi-filmler-izle/page/"                  to "Çizgi Filmler",
-        "${mainUrl}/kategoriler/yesilcam-filmleri-izlee/page/" to "Yeşilçam Filmleri"
+        "${mainUrl}/filmler/page/"           to "Tüm Filmler",
+        "${mainUrl}/turkce-dublaj/page/"      to "Türkçe Dublaj",
+        "${mainUrl}/turkce-altyazili/page/"   to "Türkçe Altyazılı",
+        "${mainUrl}/yerli-filmler/page/"      to "Yerli Filmler",
+        "${mainUrl}/diziler/page/"            to "Diziler",
+        "${mainUrl}/trendler/page/"           to "Trendler"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("${request.data}${page}").document
-        val home     = document.select("article.movie").mapNotNull { it.toSearchResult() }
+        val url = if (page == 1) request.data.removeSuffix("/page/").removeSuffix("/") else "${request.data}$page"
+        val document = app.get(url).document
+        
+        // Hem standart article/card elemanlarını hem de olası liste elemanlarını seçer
+        val home = document.select("article, div.movie-card, div.film-card, div.card").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        var title = this.selectFirst("h2 a")?.text() ?: this.selectFirst("h3 a")?.text() ?: this.selectFirst("h4 a")?.text() ?: this.selectFirst("h5 a")?.text() ?: this.selectFirst("h6 a")?.text() ?: return null
-        title = title.substringBefore(" izle")
+        val titleElement = this.selectFirst("h2 a, h3 a, h4 a, h5 a, .card-title a, a.title") ?: return null
+        var title = titleElement.text().trim()
+        if (title.isBlank()) return null
+        
+        title = title.substringBefore(" izle").trim()
 
-        val href      = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
+        val href = fixUrlNull(titleElement.attr("href") ?: this.selectFirst("a")?.attr("href")) ?: return null
+        
         var posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
-        if (posterUrl == null) {
-            posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-        }
+            ?: fixUrlNull(this.selectFirst("img")?.attr("data-lazy-src"))
+            ?: fixUrlNull(this.selectFirst("img")?.attr("src"))
 
-        return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
+        val isTv = href.contains("/dizi/")
+        val tvType = if (isTv) TvType.TvSeries else TvType.Movie
+
+        return if (isTv) {
+            newTvSeriesSearchResponse(title, href, tvType) {
+                this.posterUrl = posterUrl
+            }
+        } else {
+            newMovieSearchResponse(title, href, tvType) {
+                this.posterUrl = posterUrl
+            }
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.post(
-            "${mainUrl}/filmara.php",
-            referer = "${mainUrl}/",
-            data    = mapOf("s" to query)
-        ).document
-
-        return document.select("article.movie").mapNotNull { it.toSearchResult() }
+        // Yeni HTML yapısında arama GET isteği ile /arama?q=query şeklinde yapılıyor
+        val document = app.get("${mainUrl}/arama?q=${query}").document
+        return document.select("article, div.movie-card, div.film-card, div.card, div.search-result-item").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -60,37 +73,49 @@ class JetFilmizle : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title       = document.selectFirst("section.movie-exp div.movie-exp-title")?.text()?.substringBefore(" izle")?.trim() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("section.movie-exp img")?.attr("data-src")) ?: fixUrlNull(document.selectFirst("section.movie-exp img")?.attr("src"))
-        val yearDiv     = document.selectXpath("//div[@class='yap' and contains(strong, 'Vizyon') or contains(strong, 'Yapım')]").text().trim()
-        val year        = Regex("""(\d{4})""").find(yearDiv)?.groupValues?.get(1)?.toIntOrNull()
-        val description = document.selectFirst("section.movie-exp p.aciklama")?.text()?.trim()
-        val tags        = document.select("section.movie-exp div.catss a").map { it.text() }
-        val rating      = document.selectFirst("section.movie-exp div.imdb_puan span")?.text()?.split(" ")?.last()?.toRatingInt()
-        val actors      = document.select("section.movie-exp div.oyuncu").map {
-            Actor(it.selectFirst("div.name")!!.text(), fixUrlNull(it.selectFirst("img")!!.attr("data-src")))
+        val title = document.selectFirst("h1, section.movie-exp div.movie-exp-title, .film-details h1")?.text()?.substringBefore(" izle")?.trim() ?: return null
+        val poster = fixUrlNull(document.selectFirst("div.poster img, section.movie-exp img, .film-cover img")?.attr("data-src"))
+            ?: fixUrlNull(document.selectFirst("div.poster img, section.movie-exp img, .film-cover img")?.attr("src"))
+        
+        val yearDiv = document.select("div.yap, div.info-item, .film-info").text().trim()
+        val year = Regex("""(\d{4})""").find(yearDiv)?.groupValues?.get(1)?.toIntOrNull()
+        
+        val description = document.selectFirst("p.aciklama, div.synopsis, div.description, section.movie-exp p")?.text()?.trim()
+        val tags = document.select("div.catss a, div.genres a, .genres a").map { it.text().trim() }
+        val rating = document.selectFirst("div.imdb_puan span, .imdb-score, .rating")?.text()?.split(" ")?.last()?.toRatingInt()
+        
+        val actors = document.select("div.oyuncu, div.actor-card, .cast-item").mapNotNull {
+            val name = it.selectFirst("div.name, .actor-name")?.text()?.trim() ?: return@mapNotNull null
+            val actorPoster = fixUrlNull(it.selectFirst("img")?.attr("data-src") ?: it.selectFirst("img")?.attr("src"))
+            Actor(name, actorPoster)
         }
 
-        val recommendations = document.select("div#benzers article").mapNotNull {
-            var recName      = it.selectFirst("h2 a")?.text() ?: it.selectFirst("h3 a")?.text() ?: it.selectFirst("h4 a")?.text() ?: it.selectFirst("h5 a")?.text() ?: it.selectFirst("h6 a")?.text() ?: return@mapNotNull null
-            recName          = recName.substringBefore(" izle")
+        val recommendations = document.select("div#benzers article, div.similar-movies div.card").mapNotNull {
+            it.toSearchResult()
+        }
 
-            val recHref      = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val recPosterUrl = fixUrlNull(it.selectFirst("img")?.attr("data-src"))
+        val isTv = url.contains("/dizi/")
 
-            newMovieSearchResponse(recName, recHref, TvType.Movie) {
-                this.posterUrl = recPosterUrl
+        return if (isTv) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, ArrayList()) {
+                this.posterUrl = poster
+                this.year = year
+                this.plot = description
+                this.tags = tags
+                this.rating = rating
+                this.recommendations = recommendations
+                addActors(actors)
             }
-        }
-
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl       = poster
-            this.year            = year
-            this.plot            = description
-            this.tags            = tags
-            this.rating          = rating
-            this.recommendations = recommendations
-            addActors(actors)
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.year = year
+                this.plot = description
+                this.tags = tags
+                this.rating = rating
+                this.recommendations = recommendations
+                addActors(actors)
+            }
         }
     }
 
@@ -98,35 +123,44 @@ class JetFilmizle : MainAPI() {
         Log.d("JTF", "data » $data")
         val document = app.get(data).document
 
-        val iframes    = mutableListOf<String>()
-        val mainIframe = fixUrlNull(document.selectFirst("div#movie iframe")?.attr("data-src")) ?: fixUrlNull(document.selectFirst("div#movie iframe")?.attr("data")) ?: fixUrlNull(document.selectFirst("div#movie iframe")?.attr("src"))
-        Log.d("JTF", "mainIframe » $mainIframe")
+        val iframes = mutableListOf<String>()
+        
+        // Ana oynatıcı iframe'ini yakala
+        val mainIframe = fixUrlNull(document.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("data-src"))
+            ?: fixUrlNull(document.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("data"))
+            ?: fixUrlNull(document.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("src"))
+
         if (mainIframe != null) {
             iframes.add(mainIframe)
         }
 
-        document.select("div.film_part a").forEach {
-            val source = it.selectFirst("span")?.text()?.trim() ?: return@forEach
+        // Alternatif parça/kaynak linkleri
+        document.select("div.film_part a, div.player-servers a, ul.server-list a").forEach {
+            val source = it.text().trim()
             if (source.lowercase().contains("fragman")) return@forEach
 
-            val movDoc = app.get(it.attr("href")).document
-            val iframe = fixUrlNull(movDoc.selectFirst("div#movie iframe")?.attr("data-src")) ?: fixUrlNull(movDoc.selectFirst("div#movie iframe")?.attr("data")) ?: fixUrlNull(movDoc.selectFirst("div#movie iframe")?.attr("src"))
-            Log.d("JTF", "iframe » $iframe")
+            val href = it.attr("href")
+            if (href.isNotEmpty() && href != "#") {
+                val movDoc = app.get(fixUrl(href)).document
+                val iframe = fixUrlNull(movDoc.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("data-src"))
+                    ?: fixUrlNull(movDoc.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("data"))
+                    ?: fixUrlNull(movDoc.selectFirst("div#movie iframe, div.player-container iframe, iframe#player")?.attr("src"))
 
-            if (iframe != null) {
-                iframes.add(iframe)
-            } else {
-                movDoc.select("div#movie p a").forEach downloadLinkForEach@{ link ->
-                    val downloadLink = fixUrlNull(link.attr("href")) ?: return@downloadLinkForEach
-                    iframes.add(downloadLink)
+                if (iframe != null) {
+                    iframes.add(iframe)
+                } else {
+                    movDoc.select("div#movie p a, div.download-links a").forEach downloadLinkForEach@{ link ->
+                        val downloadLink = fixUrlNull(link.attr("href")) ?: return@downloadLinkForEach
+                        iframes.add(downloadLink)
+                    }
                 }
             }
         }
 
-        for (iframe in iframes) {
+        for (iframe in iframes.distinct()) {
             if (iframe.contains("jetv.xyz")) {
                 Log.d("JTF", "jetv » $iframe")
-                val jetvDoc    = app.get(iframe).document
+                val jetvDoc = app.get(iframe).document
                 val jetvIframe = fixUrlNull(jetvDoc.selectFirst("iframe")?.attr("src")) ?: continue
                 Log.d("JTF", "jetvIframe » $jetvIframe")
 
