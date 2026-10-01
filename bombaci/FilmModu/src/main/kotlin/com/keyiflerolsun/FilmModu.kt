@@ -1,139 +1,118 @@
-// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
+package com.lagradost.cloudstream3.extractors // Kendi paket yoluna göre (örn: com.ahmethakan.bomba) düzenleyebilirsin
 
-package com.keyiflerolsun
-
-import android.util.Log
-import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import org.jsoup.nodes.Element
 
-class FilmModu : MainAPI() {
-    override var mainUrl              = "https://www.filmmodu.live"
-    override var name                 = "FilmModu"
-    override val hasMainPage          = true
-    override var lang                 = "tr"
-    override val hasQuickSearch       = false
-    override val supportedTypes       = setOf(TvType.Movie)
-
-    override val mainPage = mainPageOf(
-        "${mainUrl}/hd-film-kategori/4k-film-izle"          to "4K",
-        "${mainUrl}/hd-film-kategori/aile-filmleri"         to "Aile",
-        "${mainUrl}/hd-film-kategori/aksiyon"               to "Aksiyon",
-        "${mainUrl}/hd-film-kategori/animasyon"             to "Animasyon",
-        "${mainUrl}/hd-film-kategori/belgeseller"           to "Belgesel",
-        "${mainUrl}/hd-film-kategori/bilim-kurgu-filmleri"  to "Bilim-Kurgu",
-        "${mainUrl}/hd-film-kategori/dram-filmleri"         to "Dram",
-        "${mainUrl}/hd-film-kategori/fantastik-filmler"     to "Fantastik",
-        "${mainUrl}/hd-film-kategori/gerilim"               to "Gerilim",
-        "${mainUrl}/hd-film-kategori/gizem-filmleri"        to "Gizem",
-        "${mainUrl}/hd-film-kategori/hd-hint-filmleri"      to "Hint Filmleri",
-        "${mainUrl}/hd-film-kategori/kisa-film"             to "Kısa Film",
-        "${mainUrl}/hd-film-kategori/hd-komedi-filmleri"    to "Komedi",
-        "${mainUrl}/hd-film-kategori/komedi"                to "Komedi",
-        "${mainUrl}/hd-film-kategori/korku-filmleri"        to "Korku",
-        "${mainUrl}/hd-film-kategori/kult-filmler-izle"     to "Kült Filmler",
-        "${mainUrl}/hd-film-kategori/macera-filmleri"       to "Macera",
-        "${mainUrl}/hd-film-kategori/muzik"                 to "Müzik",
-        "${mainUrl}/hd-film-kategori/odullu-filmler-izle"   to "Oscar Ödüllü Filmler",
-        "${mainUrl}/hd-film-kategori/romantik-filmler"      to "Romantik",
-        "${mainUrl}/hd-film-kategori/savas"                 to "Savaş",
-        "${mainUrl}/hd-film-kategori/savas-filmleri"        to "Savaş",
-        "${mainUrl}/hd-film-kategori/stand-up"              to "Stand Up",
-        "${mainUrl}/hd-film-kategori/suc-filmleri"          to "Suç",
-        "${mainUrl}/hd-film-kategori/tarih"                 to "Tarih",
-        "${mainUrl}/hd-film-kategori/tavsiye-filmler"       to "Tavsiye Filmler",
-        "${mainUrl}/hd-film-kategori/tv-film"               to "TV film",
-        "${mainUrl}/hd-film-kategori/vahsi-bati-filmleri"   to "Vahşi Batı",
+class Filmmodu : MainAPI() {
+    override var mainUrl = "https://filmmodu.live"
+    override var name = "Filmmodu"
+    override val hasMainPage = true
+    override var lang = "tr"
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(
+        TvType.Movie,
+        TvType.TvSeries,
+        TvType.Anime
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("${request.data}?page=${page}").document
-        val home     = document.select("div.movie").mapNotNull { it.toMainPageResult() }
+    // HTML Header menüsünden alınan ana sayfa kategorileri
+    override val mainPage = mainPageOf(
+        "$mainUrl/filmler?page=" to "Filmler",
+        "$mainUrl/diziler?page=" to "Diziler",
+        "$mainUrl/animes?page=" to "Animeler",
+        "$mainUrl/kesfet?page=" to "Keşfet"
+    )
 
+    override suspend fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+        val document = app.get(request.data + page).document
+        
+        // DİKKAT: "div.movie-card" kısmını sitedeki gerçek içerik kutusunun class'ı ile değiştirin.
+        val home = document.select("div.movie-card, article.item").mapNotNull {
+            it.toSearchResult()
+        }
         return newHomePageResponse(request.name, home)
     }
 
-    private fun Element.toMainPageResult(): SearchResponse? {
-        val title     = this.selectFirst("a")?.text() ?: return null
-        val href      = fixUrlNull(this.selectFirst("a")?.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("picture img")?.attr("src"))
-
-        return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
-    }
-
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("${mainUrl}/film-ara?term=${query}").document
+        // JSON-LD kısmında belirtilen arama şablonu kullanıldı
+        val url = "$mainUrl/ara?q=$query"
+        val document = app.get(url).document
 
-        return document.select("div.movie").mapNotNull { it.toMainPageResult() }
+        return document.select("div.movie-card, article.item").mapNotNull {
+            it.toSearchResult()
+        }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
+    private fun Element.toSearchResult(): SearchResponse? {
+        // DİKKAT: h2, a ve img etiketlerini sitenin yapısına göre güncelle.
+        val title = this.selectFirst("h2, .title")?.text() ?: return null
+        val href = this.selectFirst("a")?.attr("href") ?: return null
+        val posterUrl = this.selectFirst("img")?.attr("src") // veya data-src olabilir
+
+        return if (href.contains("/dizi/")) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl
+            }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
+        }
+    }
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
+        val title = document.selectFirst("h1.film-title")?.text() ?: return null
+        val poster = document.selectFirst("img.poster")?.attr("src")
+        val plot = document.selectFirst("div.summary")?.text()
 
-        val orgTitle    = document.selectFirst("div.titles h1")?.text()?.trim() ?: return null
-        val altTitle    = document.selectFirst("div.titles h2")?.text()?.trim() ?: ""
-        val title       = if (altTitle.isNotEmpty()) "$orgTitle - $altTitle" else orgTitle
-        val poster      = fixUrlNull(document.selectFirst("img.img-responsive")?.attr("src"))
-        val description = document.selectFirst("p[itemprop='description']")?.text()?.trim()
-        val year        = document.selectFirst("span[itemprop='dateCreated']")?.text()?.trim()?.toIntOrNull()
-        val tags        = document.select("div.description a[href*='-kategori/']").map { it.text() }
-        val rating      = document.selectFirst("div.description p")?.ownText()?.split(" ")?.last()?.trim()?.toRatingInt()
-        val actors      = document.select("div.description a[href*='-oyuncu-']").map { Actor(it.selectFirst("span")!!.text()) }
-        val trailer     = document.selectFirst("div.container iframe")?.attr("src")
+        // Film veya Dizi ayrımı
+        val isTvSeries = url.contains("/dizi/")
 
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = poster
-            this.plot      = description
-            this.year      = year
-            this.tags      = tags
-            this.rating    = rating
-            addActors(actors)
-            addTrailer(trailer)
+        return if (isTvSeries) {
+            val episodes = mutableListOf<Episode>()
+            // Dizi bölümlerini çeken Jsoup selector'ını buraya eklemelisin
+            document.select("ul.episodes li a").forEach {
+                episodes.add(
+                    Episode(
+                        data = it.attr("href"),
+                        name = it.text()
+                    )
+                )
+            }
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.plot = plot
+            }
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.plot = plot
+            }
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        Log.d("FLMMD", "data » $data")
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val document = app.get(data).document
-
-        document.select("div.alternates a").forEach {
-            val altLink = fixUrlNull(it.attr("href")) ?: return@forEach
-            val altName = it.text()
-            if (altName == "Fragman") return@forEach
-
-            val altReq  = app.get(altLink)
-            val vidId   = Regex("""var videoId = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
-            val vidType = Regex("""var videoType = '(.*)'""").find(altReq.text)?.groupValues?.get(1) ?: return@forEach
-
-            val vidReq = app.get("${mainUrl}/get-source?movie_id=${vidId}&type=${vidType}").parsedSafe<GetSource>() ?: return@forEach
-
-            if (vidReq.subtitle != null) {
-                subtitleCallback.invoke(
-                    SubtitleFile(
-                        lang = "Türkçe",
-                        url  = fixUrl(vidReq.subtitle)
-                    )
-                )
-            }
-
-            vidReq.sources?.forEach { source ->
-                callback.invoke(
-                    ExtractorLink(
-                        source  = "${this.name} - $altName",
-                        name    = "${this.name} - $altName",
-                        url     = fixUrl(source.src),
-                        referer = "${mainUrl}/",
-                        quality = getQualityFromName(source.label),
-                        type    = INFER_TYPE
-                    )
-                )
+        
+        // Iframe'leri veya video kaynaklarını bulup extract etme işlemi
+        document.select("iframe").forEach { iframe ->
+            val src = iframe.attr("src")
+            if (src.isNotBlank()) {
+                loadExtractor(src, "$mainUrl/", subtitleCallback, callback)
             }
         }
-
+        
         return true
     }
 }
