@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.utils.loadExtractor
 
 class Filmmodu : MainAPI() {
     override var mainUrl = "https://filmmodu.live"
