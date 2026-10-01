@@ -395,10 +395,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=https://jetfilmizle.now&sz=%size%",
-        "fileHash": "sha256-2703b73f5cfe7f2cb67e76dc0e2f977604dcd6f1ebbb3b7cafa943da1e1eeabb",
+        "fileHash": "sha256-c4015d7a4b580f2d6297041110a753850eeaf3ab9bbc6b433b7423b5cf571c33",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 13482,
+        "fileSize": 14076,
         "status": 1,
         "language": "tr",
         "authors": [
