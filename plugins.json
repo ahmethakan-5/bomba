@@ -207,10 +207,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=filmmakinesi.to&sz=%size%",
-        "fileHash": "sha256-a8bfc9e0a6db12ad5fa4f1b179f328b1de44e0b935b5b5f19d786ae0d31e3320",
+        "fileHash": "sha256-154fb213c9de1f5f637f3f4bb3b359abf94ee72d53ae9a7b436a99e006c5107d",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 13400,
+        "fileSize": 12988,
         "status": 1,
         "language": "tr",
         "authors": [
