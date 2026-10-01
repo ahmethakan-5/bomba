@@ -10,102 +10,98 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 
 class IzleAI : MainAPI() {
-    override var mainUrl              = "https://selcukflix.co"
+    override var mainUrl              = "https://selcukflix.com"
     override var name                 = "720PizleAI"
     override val hasMainPage          = true
     override var lang                 = "tr"
     override val hasQuickSearch       = true
-    override val supportedTypes       = setOf(TvType.Movie)
+    override val supportedTypes       = setOf(TvType.Movie, TvType.TvSeries)
 
-    // ! CloudFlare bypass
-    override var sequentialMainPage = true        // * https://recloudstream.github.io/dokka/-cloudstream/com.lagradost.cloudstream3/-main-a-p-i/index.html#-2049735995%2FProperties%2F101969414
-    override var sequentialMainPageDelay       = 50L  // ? 0.05 saniye
-    override var sequentialMainPageScrollDelay = 50L  // ? 0.05 saniye
+    override var sequentialMainPage            = true
+    override var sequentialMainPageDelay       = 50L
+    override var sequentialMainPageScrollDelay = 50L
 
     override val mainPage = mainPageOf(
-        "${mainUrl}/kategori/aile-filmleri"        to "Aile",
-        "${mainUrl}/kategori/aksiyon-filmleri"     to "Aksiyon",
-        "${mainUrl}/kategori/animasyon-filmleri"   to "Animasyon",
-        "${mainUrl}/kategori/belgesel-filmleri"    to "Belgesel",
-        "${mainUrl}/kategori/bilim-kurgu-filmleri" to "Bilim Kurgu",
-        "${mainUrl}/kategori/dram-filmleri"        to "Dram",
-        "${mainUrl}/kategori/fantastik-filmleri"   to "Fantastik",
-        "${mainUrl}/kategori/film-noir-filmleri"   to "Film-Noir",
-        "${mainUrl}/kategori/gerilim-filmleri"     to "Gerilim",
-        "${mainUrl}/kategori/gizem-filmleri"       to "Gizem",
-        "${mainUrl}/kategori/kisa-filmleri"        to "Kısa Film",
-        "${mainUrl}/kategori/komedi-filmleri"      to "Komedi",
-        "${mainUrl}/kategori/korku-filmleri"       to "Korku",
-        "${mainUrl}/kategori/macera-filmleri"      to "Macera",
-        "${mainUrl}/kategori/muzik-filmleri"       to "Müzik",
-        "${mainUrl}/kategori/romantik-filmleri"    to "Romantik",
-        "${mainUrl}/kategori/savas-filmleri"       to "Savaş",
-        "${mainUrl}/kategori/spor-filmleri"        to "Spor",
-        "${mainUrl}/kategori/suc-filmleri"         to "Suç",
+        "${mainUrl}/film-izle"                   to "Son Eklenen Filmler",
+        "${mainUrl}/dizi-izle"                   to "Son Eklenen Diziler",
+        "${mainUrl}/kategori/aksiyon-filmleri"     to "Aksiyon Filmleri",
+        "${mainUrl}/kategori/bilim-kurgu-filmleri" to "Bilim Kurgu Filmleri",
+        "${mainUrl}/kategori/komedi-filmleri"      to "Komedi Filmleri",
+        "${mainUrl}/kategori/korku-filmleri"       to "Korku Filmleri",
+        "${mainUrl}/kategori/dram-filmleri"        to "Dram Filmleri"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data).document
-        val home     = document.select("a.ambilight").mapNotNull { it.toSearchResult() }
+        val url = if (page > 1) "${request.data}?page=$page" else request.data
+        val document = app.get(url).document
+        
+        // Ana sayfadaki film ve dizi kartlarını seçer
+        val home = document.select("div.new-added-list a, article.movie-type-genres li a, div.grid a[href*='/dizi/'], div.grid a[href*='/film/']")
+            .mapNotNull { it.toSearchResult() }
+            .distinctBy { it.url }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("h2")?.text() ?: return null
-        val href      = fixUrlNull(this.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+        val href = fixUrlNull(this.attr("href")) ?: return null
+        
+        // Film / Dizi Başlığı
+        val title = this.selectFirst("h3")?.text()
+            ?: this.selectFirst("img")?.attr("alt")?.replace(" izle", "")?.replace(" 2026 izle", "")
+            ?: return null
 
-        return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
-    }
+        // Poster Görseli
+        val posterUrl = fixUrlNull(
+            this.selectFirst("img")?.attr("src") 
+                ?: this.selectFirst("img")?.attr("data-src")
+        )
 
-    private fun SearchItem.toSearchResponse(): SearchResponse? {
-        return newMovieSearchResponse(
-            title ?: return null,
-            "${mainUrl}/${slug}",
-            TvType.Movie,
-        ) {
-            this.posterUrl = poster
+        val isTvSeries = href.contains("/dizi/")
+
+        return if (isTvSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl
+            }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val mainReq  = app.get(mainUrl)
-        val mainPage = mainReq.document
-        val cKey     = mainPage.selectFirst("input[name='cKey']")?.attr("value") ?: return emptyList()
-        val cValue   = mainPage.selectFirst("input[name='cValue']")?.attr("value") ?: return emptyList()
-
-        val veriler   = mutableListOf<SearchResponse>()
-
         val searchReq = app.post(
             "${mainUrl}/bg/searchcontent",
             data = mapOf(
-                "cKey"       to cKey,
-                "cValue"     to cValue,
                 "searchterm" to query
             ),
             headers = mapOf(
                 "Accept"           to "application/json, text/javascript, */*; q=0.01",
                 "X-Requested-With" to "XMLHttpRequest"
             ),
-            referer = "${mainUrl}/",
-            cookies = mapOf(
-                "showAllDaFull"   to "true",
-                "PHPSESSID"       to mainReq.cookies["PHPSESSID"].toString(),
-            )
+            referer = "${mainUrl}/"
         ).parsedSafe<SearchResult>()
 
-        if (searchReq?.data?.state != true) {
-            throw ErrorLoadingException("Invalid Json response")
-        }
+        val veriler = mutableListOf<SearchResponse>()
 
-        searchReq.data.result?.forEach { searchItem ->
+        searchReq?.data?.result?.forEach { searchItem ->
             val title = searchItem.title ?: return@forEach
-            if (title.endsWith("Serisi") || title.endsWith("Series")) {
-                return@forEach
-            }
+            val slug  = searchItem.slug ?: return@forEach
+            val poster = searchItem.poster
 
-            veriler.add(searchItem.toSearchResponse() ?: return@forEach)
+            val url = if (slug.startsWith("http")) slug else "${mainUrl}/${slug.removePrefix("/")}"
+            val isTv = url.contains("/dizi/")
+
+            if (isTv) {
+                veriler.add(newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+                    this.posterUrl = poster
+                })
+            } else {
+                veriler.add(newMovieSearchResponse(title, url, TvType.Movie) {
+                    this.posterUrl = poster
+                })
+            }
         }
 
         return veriler
@@ -116,35 +112,81 @@ class IzleAI : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title       = document.selectFirst("div.gap-3.pt-5 h2")?.text() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("div.col-span-2 img")?.attr("data-src"))
-        val year        = document.selectFirst("a[href*='/yil/']")?.text()?.toIntOrNull()
-        val description = document.selectFirst("div.mv-det-p")?.text()?.trim() ?: document.selectFirst("div.w-full div.text-base")?.text()?.trim()
-        val tags        = document.select("[href*='kategori']").map { it.text() }
-        val rating      = document.selectFirst("a[href*='imdb.com'] span.font-bold")?.text()?.trim().toRatingInt()
-        val duration    = document.selectXpath("//span[contains(text(), ' dk.')]").text().trim().split(" ").first().toIntOrNull()
-        val trailer     = document.selectFirst("iframe[data-src*='youtube.com/embed/']")?.attr("data-src")
-        val actors      = document.select("div.flex.overflow-auto [href*='oyuncu']").map {
-            Actor(it.selectFirst("span span")!!.text(), it.selectFirst("img")?.attr("data-srcset")?.split(" ")?.first())
-        }
+        val title = document.selectFirst("h1")?.text()?.trim() 
+            ?: document.selectFirst("h2")?.text()?.trim() 
+            ?: return null
 
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = poster
-            this.year      = year
-            this.plot      = description
-            this.tags      = tags
-            this.rating    = rating
-            this.duration  = duration
-            addTrailer(trailer)
-            addActors(actors)
+        val poster = fixUrlNull(
+            document.selectFirst("div.relative img")?.attr("src") 
+                ?: document.selectFirst("img[alt*='$title']")?.attr("src")
+        )
+        
+        val year = document.selectFirst("span:contains(202)")?.text()?.toIntOrNull() 
+            ?: document.selectFirst("a[href*='/yil/']")?.text()?.toIntOrNull()
+
+        val description = document.selectFirst("div.text-base")?.text()?.trim() 
+            ?: document.selectFirst("p.description")?.text()?.trim()
+
+        val tags = document.select("a[href*='/kategori/'], span.line-clamp-1").map { it.text() }
+        val rating = document.selectFirst("h4.text-xs")?.text()?.trim()?.toRatingInt()
+        
+        val isTv = url.contains("/dizi/")
+
+        return if (isTv) {
+            val episodes = mutableListOf<Episode>()
+            
+            // Bölüm listesini DOM üzerinden ayrıştırır
+            document.select("a[href*='/sezon-']").forEach { epAnchor ->
+                val epHref = fixUrlNull(epAnchor.attr("href")) ?: return@forEach
+                val epText = epAnchor.selectFirst("div.text-white")?.text() ?: epAnchor.text()
+                
+                val seasonNum = Regex("sezon-(\\d+)").find(epHref)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                val episodeNum = Regex("bolum-(\\d+)").find(epHref)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+
+                episodes.add(
+                    newEpisode(epHref) {
+                        this.name = epText
+                        this.season = seasonNum
+                        this.episode = episodeNum
+                    }
+                )
+            }
+
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.year      = year
+                this.plot      = description
+                this.tags      = tags
+                this.rating    = rating
+            }
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.year      = year
+                this.plot      = description
+                this.tags      = tags
+                this.rating    = rating
+            }
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        Log.d("IAI", "data » $data")
+    override suspend fun loadLinks(
+        data: String, 
+        isCasting: Boolean, 
+        subtitleCallback: (SubtitleFile) -> Unit, 
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        Log.d("IzleAI", "data » $data")
         val document = app.get(data).document
-        val iframe   = fixUrlNull(document.selectFirst("div.player iframe")?.attr("src")) ?: return false
-        Log.d("IAI", "iframe » $iframe")
+        
+        // Iframe seçici
+        val iframe = fixUrlNull(
+            document.selectFirst("iframe[src*='player']")?.attr("src") 
+                ?: document.selectFirst("div.player iframe")?.attr("src")
+                ?: document.selectFirst("iframe")?.attr("src")
+        ) ?: return false
+
+        Log.d("IzleAI", "iframe » $iframe")
 
         loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
 
