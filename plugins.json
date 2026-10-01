@@ -375,10 +375,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=720pizle.com&sz=%size%",
-        "fileHash": "sha256-dd4d1c3d144f347cc945eeae6a31d365e3ad07b6978c63a8e122a5f1462285d4",
+        "fileHash": "sha256-b26042f71137b34ba604f7d85a46d2ebae3dfe029de0b0d255d77cabed2ee384",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 15934,
+        "fileSize": 15948,
         "status": 1,
         "language": "tr",
         "authors": [
