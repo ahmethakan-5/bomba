@@ -7,7 +7,6 @@ import android.content.Context
 @CloudstreamPlugin
 class FilmModuPlugin: Plugin() {
     override fun load(context: Context) {
-    registerMainAPI(FilmModu())
-}
+        registerMainAPI(FilmModu())
     }
 }
