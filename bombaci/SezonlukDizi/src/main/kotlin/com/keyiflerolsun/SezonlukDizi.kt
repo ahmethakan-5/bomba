@@ -24,20 +24,20 @@ class SezonlukDizi : MainAPI() {
         "${mainUrl}/diziler.asp?siralama_tipi=id&kat=3&s="    to "Asya Dizileri",
         "${mainUrl}/diziler.asp?siralama_tipi=id&kat=4&s="    to "Animasyonlar",
         "${mainUrl}/diziler.asp?siralama_tipi=id&kat=5&s="    to "Animeler",
-        "${mainUrl}/diziler.asp?siralama_tipi=id&kat=6&s="    to "Belgeseller",
+        "${mainUrl}/diziler.asp?siralama_tipi=id&kat=6&s="    to "Belgeseller"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get("${request.data}${page}").document
-        val home     = document.select("div.afis a").mapNotNull { it.toSearchResult() }
+        val home     = document.select("div#soncikan div.column a, div.afis a, div#enler a.column").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("div.description")?.text()?.trim() ?: return null
+        val title     = this.selectFirst("span.title, div.description")?.text()?.trim() ?: return null
         val href      = fixUrlNull(this.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
+        val posterUrl = fixUrlNull(this.selectFirst("img")?.let { it.attr("data-src").ifEmpty { it.attr("src") } })
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
     }
@@ -45,7 +45,7 @@ class SezonlukDizi : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("${mainUrl}/diziler.asp?adi=${query}").document
 
-        return document.select("div.afis a").mapNotNull { it.toSearchResult() }
+        return document.select("div.afis a, div.column a").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -53,24 +53,24 @@ class SezonlukDizi : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val title       = document.selectFirst("div.header")?.text()?.trim() ?: return null
-        val poster      = fixUrlNull(document.selectFirst("div.image img")?.attr("data-src")) ?: return null
+        val title       = document.selectFirst("div.header, h1")?.text()?.trim() ?: return null
+        val poster      = fixUrlNull(document.selectFirst("div.image img, div.poster img")?.let { it.attr("data-src").ifEmpty { it.attr("src") } }) ?: return null
         val year        = document.selectFirst("div.extra span")?.text()?.trim()?.split("-")?.first()?.toIntOrNull()
-        val description = document.selectFirst("span#tartismayorum-konu")?.text()?.trim()
+        val description = document.selectFirst("span#tartismayorum-konu, p.description")?.text()?.trim()
         val tags        = document.select("div.labels a[href*='tur']").mapNotNull { it.text().trim() }
-        val rating      = document.selectFirst("div.dizipuani a div")?.text()?.trim()?.replace(",", ".").toRatingInt()
+        val rating      = document.selectFirst("div.dizipuani a div")?.text()?.trim()?.replace(",", ".")?.toRatingInt()
         val duration    = document.selectXpath("//span[contains(text(), 'Dk.')]").text().trim().substringBefore(" Dk.").toIntOrNull()
 
         val endpoint    = url.split("/").last()
 
         val actorsReq  = app.get("${mainUrl}/oyuncular/${endpoint}").document
-        val actors     = actorsReq.select("div.doubling div.ui").map {
+        val actors     = actorsReq.select("div.doubling div.ui").mapNotNull {
+            val actorName = it.selectFirst("div.header")?.text()?.trim() ?: return@mapNotNull null
             Actor(
-                it.selectFirst("div.header")!!.text().trim(),
+                actorName,
                 fixUrlNull(it.selectFirst("img")?.attr("src"))
             )
         }
-
 
         val episodesReq = app.get("${mainUrl}/bolumler/${endpoint}").document
         val episodes    = mutableListOf<Episode>()
@@ -89,7 +89,6 @@ class SezonlukDizi : MainAPI() {
             }
         }
 
-
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
             this.year      = year
@@ -104,7 +103,7 @@ class SezonlukDizi : MainAPI() {
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("SZD", "data » $data")
         val document = app.get(data).document
-        val aspData = getAspData()
+        val aspData  = getAspData()
         val bid      = document.selectFirst("div#dilsec")?.attr("data-id") ?: return false
         Log.d("SZD", "bid » $bid")
 
@@ -183,13 +182,12 @@ class SezonlukDizi : MainAPI() {
         return true
     }
 
-    //Helper function for getting the number (probably some kind of version?) after the dataAlternatif and dataEmbed
-    private suspend fun getAspData() : AspData{
+    private suspend fun getAspData(): AspData {
         val websiteCustomJavascript = app.get("${this.mainUrl}/js/site.min.js")
         val dataAlternatifAsp = Regex("""dataAlternatif(.*?).asp""").find(websiteCustomJavascript.text)?.groupValues?.get(1)
             .toString()
         val dataEmbedAsp = Regex("""dataEmbed(.*?).asp""").find(websiteCustomJavascript.text)?.groupValues?.get(1)
             .toString()
-        return AspData(dataAlternatifAsp,dataEmbedAsp)
+        return AspData(dataAlternatifAsp, dataEmbedAsp)
     }
 }
