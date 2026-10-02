@@ -229,10 +229,15 @@ class HDFilmCehennemi : MainAPI() {
                 }
                 iframe = fixUrl(iframe)
 
-                // Once sitenin verdigi adresi dene, olmazsa eski /playerr/ adresine don
-                val adaylar = mutableListOf(iframe)
+                // Site artik oynaticiyi /rplayer/<id>/ adresinden aciyor; sirayla dene
+                val adaylar = mutableListOf<String>()
                 if (iframe.contains("?rapidrame_id=")) {
-                    adaylar.add("${mainUrl}/playerr/" + iframe.substringAfter("?rapidrame_id="))
+                    val rid = iframe.substringAfter("?rapidrame_id=").substringBefore("&").trim('/')
+                    adaylar.add("${mainUrl}/rplayer/$rid/")
+                    adaylar.add(iframe)
+                    adaylar.add("${mainUrl}/playerr/$rid")
+                } else {
+                    adaylar.add(iframe)
                 }
 
                 for (aday in adaylar) {
