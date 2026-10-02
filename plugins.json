@@ -461,10 +461,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.setfilmizle.ltd&sz=%size%",
-        "fileHash": "sha256-f14d3f99cae06a6586359fbcadcf425e0bcc886ceaf188966f460177f8558d9c",
+        "fileHash": "sha256-41fe6da82d2982619d9eb7a3f93158c0a703312bc796a174488e7f8fd11be50f",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 20419,
+        "fileSize": 21251,
         "status": 1,
         "language": "tr",
         "authors": [
