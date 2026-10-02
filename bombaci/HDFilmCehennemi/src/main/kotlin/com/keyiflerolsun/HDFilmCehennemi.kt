@@ -161,10 +161,22 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    private suspend fun invokeLocalSource(source: String, url: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
-        val script    = app.get(url, referer = "${mainUrl}/").document.select("script").find { it.data().contains("sources:") }?.data() ?: return
+    private suspend fun invokeLocalSource(source: String, url: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+        val document = app.get(url, referer = "${mainUrl}/").document
+        val script   = document.select("script").find { it.data().contains("sources:") }?.data()
+
+        if (script == null) {
+            Log.d("HDCH", "HATA: 'sources:' iceren script yok » $url » sayfa basi: ${document.html().take(300)}")
+            return false
+        }
+
         val videoData = getAndUnpack(script).substringAfter("file_link=\"").substringBefore("\";")
-        val subData   = script.substringAfter("tracks: [").substringBefore("]")
+        if (videoData.isBlank()) {
+            Log.d("HDCH", "HATA: file_link bulunamadi » $url » script basi: ${script.take(300)}")
+            return false
+        }
+
+        val subData = script.substringAfter("tracks: [").substringBefore("]")
 
         callback.invoke(
             newExtractorLink(
@@ -182,13 +194,18 @@ class HDFilmCehennemi : MainAPI() {
                 SubtitleFile(it.label.toString(), fixUrl(it.file.toString()))
             )
         }
+
+        return true
     }
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("HDCH", "data » $data")
         val document = app.get(data).document
 
-        document.select("div.alternative-links").map { element ->
+        val groups = document.select("div.alternative-links")
+        Log.d("HDCH", "alternative-links sayisi » ${groups.size}")
+
+        groups.map { element ->
             element to element.attr("data-lang").uppercase()
         }.forEach { (element, langCode) ->
             element.select("button.alternative-link").map { button ->
@@ -203,13 +220,31 @@ class HDFilmCehennemi : MainAPI() {
                     referer = data
                 ).text
 
-                var iframe = Regex("""data-src=\\"([^"]+)""").find(apiGet)?.groupValues?.get(1)?.replace("\\", "") ?: return@forEach
+                Log.d("HDCH", "API » $source » $videoID » ${apiGet.take(300)}")
+
+                var iframe = Regex("""data-src=\\"([^"]+)""").find(apiGet)?.groupValues?.get(1)?.replace("\\", "")
+                if (iframe == null) {
+                    Log.d("HDCH", "HATA: API cevabinda iframe yok » $source » $videoID")
+                    return@forEach
+                }
+                iframe = fixUrl(iframe)
+
+                // Once sitenin verdigi adresi dene, olmazsa eski /playerr/ adresine don
+                val adaylar = mutableListOf(iframe)
                 if (iframe.contains("?rapidrame_id=")) {
-                    iframe = "${mainUrl}/playerr/" + iframe.substringAfter("?rapidrame_id=")
+                    adaylar.add("${mainUrl}/playerr/" + iframe.substringAfter("?rapidrame_id="))
                 }
 
-                Log.d("HDCH", "$source » $videoID » $iframe")
-                invokeLocalSource(source, iframe, subtitleCallback, callback)
+                for (aday in adaylar) {
+                    Log.d("HDCH", "$source » $videoID » deneniyor » $aday")
+                    val basarili = try {
+                        invokeLocalSource(source, aday, subtitleCallback, callback)
+                    } catch (e: Exception) {
+                        Log.d("HDCH", "HATA: $aday » ${e.message}")
+                        false
+                    }
+                    if (basarili) break
+                }
             }
         }
 
