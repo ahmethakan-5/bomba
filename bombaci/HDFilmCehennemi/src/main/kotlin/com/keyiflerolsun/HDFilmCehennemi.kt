@@ -170,29 +170,60 @@ class HDFilmCehennemi : MainAPI() {
             return false
         }
 
-        val videoData = getAndUnpack(script).substringAfter("file_link=\"").substringBefore("\";")
-        if (videoData.isBlank()) {
-            Log.d("HDCH", "HATA: file_link bulunamadi » $url » script basi: ${script.take(300)}")
+        val unpacked = try { getAndUnpack(script) } catch (e: Exception) { script }
+        val temiz    = unpacked.replace("\\/", "/")
+
+        var videoUrl: String? = null
+
+        // 1) Eski yontem: file_link="<base64>"
+        if (unpacked.contains("file_link=\"")) {
+            val b64 = unpacked.substringAfter("file_link=\"").substringBefore("\";")
+            videoUrl = try { base64Decode(b64) } catch (e: Exception) { null }
+        }
+
+        // 2) Dogrudan m3u8 / mp4 adresi ara (reklam videolarini ele)
+        if (videoUrl.isNullOrBlank()) {
+            val bulunanlar = Regex("""https?://[^"'\s<>\\]+?\.(?:m3u8|mp4)[^"'\s<>\\]*""")
+                .findAll(temiz).map { it.value }.filter { !it.contains("rekla") }.toList()
+            videoUrl = bulunanlar.firstOrNull { it.contains(".m3u8") } ?: bulunanlar.firstOrNull()
+        }
+
+        // 3) file: "http..." kalibi
+        if (videoUrl.isNullOrBlank()) {
+            videoUrl = Regex("""file\s*:\s*"(https?://[^"]+)"""").find(temiz)?.groupValues?.get(1)
+        }
+
+        val finalUrl = videoUrl
+        if (finalUrl.isNullOrBlank()) {
+            Log.d("HDCH", "TESHIS » $url » script=${script.length} unpacked=${unpacked.length} file_link=${unpacked.contains("file_link")} m3u8=${unpacked.contains("m3u8")} mp4=${unpacked.contains(".mp4")} atob=${unpacked.contains("atob")} dc_=${unpacked.contains("dc_")}")
+            val idx = unpacked.indexOf("sources:").coerceAtLeast(0)
+            val bas = (idx - 200).coerceAtLeast(0)
+            unpacked.substring(bas).take(2400).chunked(800).forEachIndexed { i, parca ->
+                Log.d("HDCH", "KOD[$i] » $parca")
+            }
             return false
         }
 
-        val subData = script.substringAfter("tracks: [").substringBefore("]")
+        Log.d("HDCH", "VIDEO BULUNDU » $source » $finalUrl")
 
         callback.invoke(
             newExtractorLink(
                 source = source,
                 name   = source,
-                url    = base64Decode(videoData)
+                url    = finalUrl
             ) {
                 this.referer = "${mainUrl}/"
                 this.quality = Qualities.Unknown.value
             }
         )
 
-        AppUtils.tryParseJson<List<SubSource>>("[${subData}]")?.filter { it.kind == "captions" }?.map {
-            subtitleCallback.invoke(
-                SubtitleFile(it.label.toString(), fixUrl(it.file.toString()))
-            )
+        val subData = script.substringAfter("tracks: [", "").substringBefore("]")
+        if (subData.isNotBlank()) {
+            AppUtils.tryParseJson<List<SubSource>>("[${subData}]")?.filter { it.kind == "captions" }?.map {
+                subtitleCallback.invoke(
+                    SubtitleFile(it.label.toString(), fixUrl(it.file.toString()))
+                )
+            }
         }
 
         return true
