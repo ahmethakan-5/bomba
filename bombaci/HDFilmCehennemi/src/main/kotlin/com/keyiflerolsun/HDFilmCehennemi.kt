@@ -4,6 +4,7 @@ import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -161,7 +162,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    private suspend fun invokeLocalSource(source: String, url: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    private suspend fun invokeLocalSource(source: String, url: String, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit, webViewDene: Boolean = false): Boolean {
         val document = app.get(url, referer = "${mainUrl}/").document
         val script   = document.select("script").find { it.data().contains("sources:") }?.data()
 
@@ -193,6 +194,24 @@ class HDFilmCehennemi : MainAPI() {
             videoUrl = Regex("""file\s*:\s*"(https?://[^"]+)"""").find(temiz)?.groupValues?.get(1)
         }
 
+        // 4) Video adresi sayfadaki sifreli JS ile uretiliyor: sayfayi WebView'da calistirip m3u8 istegini yakala
+        if (videoUrl.isNullOrBlank() && webViewDene) {
+            val yakala = Regex("""\.m3u8|\.txt|/hls/|/master""")
+            videoUrl = try {
+                Log.d("HDCH", "WEBVIEW deneniyor » $url")
+                val cevap = app.get(
+                    url,
+                    referer     = "${mainUrl}/",
+                    interceptor = WebViewResolver(yakala)
+                )
+                cevap.url.takeIf { yakala.containsMatchIn(it) }
+            } catch (e: Exception) {
+                Log.d("HDCH", "HATA: WebView » ${e.message}")
+                null
+            }
+            Log.d("HDCH", "WEBVIEW sonuc » $videoUrl")
+        }
+
         val finalUrl = videoUrl
         if (finalUrl.isNullOrBlank()) {
             Log.d("HDCH", "TESHIS » $url » script=${script.length} unpacked=${unpacked.length} file_link=${unpacked.contains("file_link")} m3u8=${unpacked.contains("m3u8")} mp4=${unpacked.contains(".mp4")} atob=${unpacked.contains("atob")} dc_=${unpacked.contains("dc_")}")
@@ -206,11 +225,14 @@ class HDFilmCehennemi : MainAPI() {
 
         Log.d("HDCH", "VIDEO BULUNDU » $source » $finalUrl")
 
+        val hls = finalUrl.contains(".m3u8") || script.contains("\"hls\"")
+
         callback.invoke(
             newExtractorLink(
                 source = source,
                 name   = source,
-                url    = finalUrl
+                url    = finalUrl,
+                type   = if (hls) ExtractorLinkType.M3U8 else null
             ) {
                 this.referer = "${mainUrl}/"
                 this.quality = Qualities.Unknown.value
@@ -274,7 +296,7 @@ class HDFilmCehennemi : MainAPI() {
                 for (aday in adaylar) {
                     Log.d("HDCH", "$source » $videoID » deneniyor » $aday")
                     val basarili = try {
-                        invokeLocalSource(source, aday, subtitleCallback, callback)
+                        invokeLocalSource(source, aday, subtitleCallback, callback, webViewDene = (aday == adaylar.first()))
                     } catch (e: Exception) {
                         Log.d("HDCH", "HATA: $aday » ${e.message}")
                         false
