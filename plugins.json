@@ -289,10 +289,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=hdfilmcehennemi.nl&sz=%size%",
-        "fileHash": "sha256-7d4c0201af2527779345800259da292cb21d2c8625a309f44f752d60f5ee6d94",
+        "fileHash": "sha256-f9bff2b9892fc3f5b8878e0a89b42133378176d5c8dfe917d9e6eb655bd98b55",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 22770,
+        "fileSize": 22769,
         "status": 1,
         "language": "tr",
         "authors": [
@@ -303,7 +303,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 18,
+        "version": 19,
         "internalName": "HDFilmCehennemi",
         "description": "T\u00fcrkiye'nin en h\u0131zl\u0131 hd film izleme sitesi",
         "url": "https://raw.githubusercontent.com/ahmethakan-5/bomba/builds/HDFilmCehennemi.cs3",
