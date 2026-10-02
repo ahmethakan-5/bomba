@@ -503,10 +503,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.sinema.gg&sz=%size%",
-        "fileHash": "sha256-6b3f3498470372745f6615c31cbdc3cfdabee82eaa24c6ccca1689beabf2a113",
+        "fileHash": "sha256-91519243c0f8fe7410be15db4593842c5a0e9fec4553a105fb29a528b37b6eb9",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 13036,
+        "fileSize": 13626,
         "status": 1,
         "language": "tr",
         "authors": [
