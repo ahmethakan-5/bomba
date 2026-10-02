@@ -289,10 +289,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=hdfilmcehennemi.nl&sz=%size%",
-        "fileHash": "sha256-9aa3ef845ced47876d5fc33ceea6607d8b067953d7075968b560368ca925262e",
+        "fileHash": "sha256-9048eea9ff3bfd9cf3f455434f206e1b2b29d844a6083a7bae3a6eb5c434ea0b",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 24577,
+        "fileSize": 25877,
         "status": 1,
         "language": "tr",
         "authors": [
