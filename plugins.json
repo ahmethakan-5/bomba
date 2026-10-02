@@ -565,10 +565,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=webteizle3.xyz&sz=%size%",
-        "fileHash": "sha256-9a21d24df0e69af13e309bef0bc249378252fd43faae59a6e8663e9a61fa9831",
+        "fileHash": "sha256-a26cf5a1939ce07814878d3a5122b44edf175f64cbddd438d8d2c7b7cac6d49b",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 21420,
+        "fileSize": 22448,
         "status": 1,
         "language": "tr",
         "authors": [
