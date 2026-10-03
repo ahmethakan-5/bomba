@@ -2,6 +2,7 @@
 
 package com.keyiflerolsun
 
+import android.util.Base64
 import android.util.Log
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
@@ -179,65 +180,80 @@ class CizgiMax : MainAPI() {
 
         val iframeUrls = mutableSetOf<String>()
 
-        // 1. DOM elemanlarından iframe / player bağlantılarını toplama
-        document.select("[data-frame], [data-src], [data-embed], [data-url], ul.linkler li a, .server-list a, .servers a, button[data-frame]").forEach { element ->
-            val frame = element.attr("data-frame").ifEmpty {
-                element.attr("data-src").ifEmpty {
-                    element.attr("data-embed").ifEmpty {
-                        element.attr("data-url")
-                    }
-                }
+        fun cleanAndAddUrl(urlStr: String?) {
+            if (urlStr.isNullOrBlank()) return
+            var cleanUrl = urlStr.trim().replace("\\/", "/")
+            
+            if (cleanUrl.startsWith("//")) {
+                cleanUrl = "https:$cleanUrl"
             }
-            if (frame.isNotBlank()) {
-                val fullUrl = if (frame.length == 24 || (!frame.contains("/") && !frame.contains("."))) {
-                    "https://tau-video.xyz/embed/$frame"
-                } else {
-                    frame
+
+            if (cleanUrl.length == 24 && !cleanUrl.contains("/") && !cleanUrl.contains(".")) {
+                cleanUrl = "https://tau-video.xyz/embed/$cleanUrl"
+            }
+
+            fixUrlNull(cleanUrl)?.let {
+                if (!it.contains("google.com") && !it.contains("facebook.com") && !it.contains("twitter.com")) {
+                    iframeUrls.add(it)
                 }
-                fixUrlNull(fullUrl)?.let { iframeUrls.add(it) }
             }
         }
 
-        // 2. Sayfadaki tüm iframe etiketleri
+        // 1. DOM Üzerindeki tüm olası öznitelikler
+        document.select("[data-frame], [data-src], [data-embed], [data-url], [data-link], [data-video], [data-player], [data-target], ul.linkler li a, .server-list a, .servers a, button[data-frame]").forEach { element ->
+            listOf("data-frame", "data-src", "data-embed", "data-url", "data-link", "data-video", "data-player", "src", "href").forEach { attr ->
+                cleanAndAddUrl(element.attr(attr))
+            }
+        }
+
+        // 2. Tüm iframe etiketleri
         document.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src").ifEmpty {
-                iframe.attr("data-src").ifEmpty {
-                    iframe.attr("data-frame")
+            cleanAndAddUrl(iframe.attr("src"))
+            cleanAndAddUrl(iframe.attr("data-src"))
+            cleanAndAddUrl(iframe.attr("data-frame"))
+        }
+
+        // 3. Regex ile HTML ve JS içinde gizlenmiş URL / ID desenleri
+        val urlRegexes = listOf(
+            """https?://[^\s"'<>\\]+\.(?:xyz|net|com|org|ru|tv|online|site|mobi)/[^\s"'<>\\]+""",
+            """data-frame=["']([^"']+)["']""",
+            """data-src=["']([^"']+)["']""",
+            """data-url=["']([^"']+)["']""",
+            """data-embed=["']([^"']+)["']""",
+            """<iframe[^>]+src=["']([^"']+)["']""",
+            """src\s*:\s*["']([^"']+)["']""",
+            """file\s*:\s*["']([^"']+)["']""",
+            """url\s*:\s*["']([^"']+)["']"""
+        )
+
+        urlRegexes.forEach { pattern ->
+            Regex(pattern, RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
+                val extracted = if (match.groupValues.size > 1) match.groupValues[1] else match.value
+                cleanAndAddUrl(extracted)
+            }
+        }
+
+        // 4. Tau Video ID desenleri (24 karakterlik alphanumerik hash'ler)
+        Regex("""data-id=["']([a-zA-Z0-9_-]{20,32})["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
+            cleanAndAddUrl("https://tau-video.xyz/embed/${match.groupValues[1]}")
+        }
+
+        // 5. Base64 kodlanmış URL denemesi
+        Regex("""["']([a-zA-Z0-9+/=]{30,})["']""").findAll(rawHtml).forEach { match ->
+            try {
+                val decoded = String(Base64.decode(match.groupValues[1], Base64.DEFAULT))
+                if (decoded.contains("http://") || decoded.contains("https://") || decoded.contains("tau-video")) {
+                    cleanAndAddUrl(decoded)
                 }
-            }
-            if (src.isNotBlank()) {
-                fixUrlNull(src)?.let { iframeUrls.add(it) }
-            }
-        }
-
-        // 3. HTML kaynak kodundan Regex ile data-frame, iframe ve player embed bağlantılarını çıkarma
-        Regex("""data-frame=["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-            fixUrlNull(match.groupValues[1])?.let { iframeUrls.add(it) }
-        }
-
-        Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-            fixUrlNull(match.groupValues[1])?.let { iframeUrls.add(it) }
-        }
-
-        Regex("""https?://[^\s"'<>]+\.(?:xyz|net|com|org|ru|tv|online)/embed/[^\s"'<>]+""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-            fixUrlNull(match.value)?.let { iframeUrls.add(it) }
-        }
-
-        Regex("""data-id=["']([a-zA-Z0-9_-]+)["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-            val id = match.groupValues[1]
-            if (id.length > 5) {
-                iframeUrls.add("https://tau-video.xyz/embed/$id")
-            }
+            } catch (_: Exception) {}
         }
 
         Log.d("CZGM", "Found iframe URLs: $iframeUrls")
 
-        // 4. Bulunan tüm iframe/embed bağlantılarını Extractor'a gönderme
+        // 6. Yakalanan iframe URL'lerini ayıklayıcıya (Extractor) gönder
         iframeUrls.forEach { iframe ->
-            if (iframe.isNotBlank() && !iframe.contains("google.com/recaptcha") && !iframe.contains("wargamings.net")) {
-                Log.d("CZGM", "Loading extractor for iframe » $iframe")
-                loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
-            }
+            Log.d("CZGM", "Loading extractor for iframe » $iframe")
+            loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
         }
 
         return true
