@@ -180,10 +180,23 @@ class CizgiMax : MainAPI() {
 
         val iframeUrls = mutableSetOf<String>()
 
+        fun isValidVideoUrl(urlStr: String): Boolean {
+            val lower = urlStr.lowercase()
+            if (urlStr == data || lower.contains("-izle") || lower.contains("/diziler/")) return false
+            if (lower.endsWith(".css") || lower.endsWith(".png") || lower.endsWith(".jpg") || 
+                lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".svg") || 
+                lower.endsWith(".gif") || lower.endsWith(".ico") || lower.endsWith(".woff") || lower.endsWith(".woff2")) return false
+            if (lower.contains("google") || lower.contains("bunny.net") || lower.contains("fontawesome") || 
+                lower.contains("swiper") || lower.contains("discord.com") || lower.contains("youtube.com") || 
+                lower.contains("facebook.com") || lower.contains("twitter.com") || lower.contains("cloudflare")) return false
+            if (lower.contains("/api/") || lower.contains("dosya secilmedi") || lower.contains("/ajaxservice/")) return false
+            return true
+        }
+
         fun cleanAndAddUrl(urlStr: String?) {
             if (urlStr.isNullOrBlank()) return
             var cleanUrl = urlStr.trim().replace("\\/", "/")
-            
+
             if (cleanUrl.startsWith("//")) {
                 cleanUrl = "https:$cleanUrl"
             }
@@ -192,53 +205,52 @@ class CizgiMax : MainAPI() {
                 cleanUrl = "https://tau-video.xyz/embed/$cleanUrl"
             }
 
-            fixUrlNull(cleanUrl)?.let {
-                if (!it.contains("google.com") && !it.contains("facebook.com") && !it.contains("twitter.com")) {
-                    iframeUrls.add(it)
+            fixUrlNull(cleanUrl)?.let { url ->
+                if (isValidVideoUrl(url)) {
+                    iframeUrls.add(url)
                 }
             }
         }
 
-        // 1. DOM Üzerindeki tüm olası öznitelikler
-        document.select("[data-frame], [data-src], [data-embed], [data-url], [data-link], [data-video], [data-player], [data-target], ul.linkler li a, .server-list a, .servers a, button[data-frame]").forEach { element ->
-            listOf("data-frame", "data-src", "data-embed", "data-url", "data-link", "data-video", "data-player", "src", "href").forEach { attr ->
-                cleanAndAddUrl(element.attr(attr))
+        // 1. wargamings.net Script'lerini Çekip İçindeki Video URL'lerini Çözme
+        val wargamingsRegex = Regex("""https?://[^\s"'<>\\]*wargamings\.net/[^\s"'<>\\]+""", RegexOption.IGNORE_CASE)
+        wargamingsRegex.findAll(rawHtml).forEach { match ->
+            val scriptUrl = match.value
+            try {
+                Log.d("CZGM", "Fetching player script » $scriptUrl")
+                val scriptText = app.get(scriptUrl, headers = mapOf("Referer" to data)).text
+                
+                // Script içindeki iframe src / tau-video / embed url araması
+                Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(scriptText).forEach { m ->
+                    cleanAndAddUrl(m.value)
+                }
+                Regex("""data-id=["']([a-zA-Z0-9_-]{20,32})["']""").findAll(scriptText).forEach { m ->
+                    cleanAndAddUrl("https://tau-video.xyz/embed/${m.groupValues[1]}")
+                }
+            } catch (e: Exception) {
+                Log.e("CZGM", "Script fetch error", e)
             }
         }
 
-        // 2. Tüm iframe etiketleri
+        // 2. DOM Üzerindeki Gerçek Iframe ve Player Etiketleri
         document.select("iframe").forEach { iframe ->
             cleanAndAddUrl(iframe.attr("src"))
             cleanAndAddUrl(iframe.attr("data-src"))
             cleanAndAddUrl(iframe.attr("data-frame"))
         }
 
-        // 3. Regex ile HTML ve JS içinde gizlenmiş URL / ID desenleri
-        val urlRegexes = listOf(
-            """https?://[^\s"'<>\\]+\.(?:xyz|net|com|org|ru|tv|online|site|mobi)/[^\s"'<>\\]+""",
-            """data-frame=["']([^"']+)["']""",
-            """data-src=["']([^"']+)["']""",
-            """data-url=["']([^"']+)["']""",
-            """data-embed=["']([^"']+)["']""",
-            """<iframe[^>]+src=["']([^"']+)["']""",
-            """src\s*:\s*["']([^"']+)["']""",
-            """file\s*:\s*["']([^"']+)["']""",
-            """url\s*:\s*["']([^"']+)["']"""
-        )
-
-        urlRegexes.forEach { pattern ->
-            Regex(pattern, RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-                val extracted = if (match.groupValues.size > 1) match.groupValues[1] else match.value
-                cleanAndAddUrl(extracted)
+        document.select("[data-frame], [data-src], [data-embed], [data-video], [data-player]").forEach { element ->
+            listOf("data-frame", "data-src", "data-embed", "data-video", "data-player").forEach { attr ->
+                cleanAndAddUrl(element.attr(attr))
             }
         }
 
-        // 4. Tau Video ID desenleri (24 karakterlik alphanumerik hash'ler)
+        // 3. Tau Video Hash Taraması
         Regex("""data-id=["']([a-zA-Z0-9_-]{20,32})["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
             cleanAndAddUrl("https://tau-video.xyz/embed/${match.groupValues[1]}")
         }
 
-        // 5. Base64 kodlanmış URL denemesi
+        // 4. Base64 Kodlanmış Video Linkleri
         Regex("""["']([a-zA-Z0-9+/=]{30,})["']""").findAll(rawHtml).forEach { match ->
             try {
                 val decoded = String(Base64.decode(match.groupValues[1], Base64.DEFAULT))
@@ -250,7 +262,7 @@ class CizgiMax : MainAPI() {
 
         Log.d("CZGM", "Found iframe URLs: $iframeUrls")
 
-        // 6. Yakalanan iframe URL'lerini ayıklayıcıya (Extractor) gönder
+        // 5. Bulunan Video Bağlantılarını Extractor'a Gönder
         iframeUrls.forEach { iframe ->
             Log.d("CZGM", "Loading extractor for iframe » $iframe")
             loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
