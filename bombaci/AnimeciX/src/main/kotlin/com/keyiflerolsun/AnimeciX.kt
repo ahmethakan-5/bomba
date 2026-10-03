@@ -112,10 +112,25 @@ class AnimeciX : MainAPI() {
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         Log.d("ACX", "data » $data")
-        val iframeLink = app.get("${mainUrl}/${data}", referer="${mainUrl}/").url
+
+        // data artik tam adres geliyor; eskiden basina mainUrl eklenince adres bozuluyordu
+        val apiUrl = if (data.startsWith("http")) data else "${mainUrl}/${data.trimStart('/')}"
+
+        val response = app.get(apiUrl, referer = "${mainUrl}/")
+        Log.d("ACX", "best-video » kod=${response.code} » sonUrl=${response.url} » ${response.text.take(500)}")
+
+        // Yonlendirme ile embed adresine gidiyorsa son adres, degilse cevabin icinden bul
+        var iframeLink = response.url
+        if (!iframeLink.contains("tau-video")) {
+            val govde = response.text.replace("\\/", "/")
+            iframeLink = Regex("""https?://[^"'\s<>\\]*tau-video[^"'\s<>\\]*""").find(govde)?.value
+                ?: Regex("\"(?:url|embed|link)\"\\s*:\\s*\"(https?://[^\"]+)\"").find(govde)?.groupValues?.get(1)
+                ?: iframeLink
+        }
         Log.d("ACX", "iframeLink » $iframeLink")
 
-        loadExtractor(iframeLink, "${mainUrl}/", subtitleCallback, callback)
+        val sonuc = loadExtractor(iframeLink, "${mainUrl}/", subtitleCallback, callback)
+        Log.d("ACX", "loadExtractor sonuc » $sonuc")
 
         return true
     }
