@@ -18,36 +18,42 @@ class YouTube : MainAPI() {
 
     private val ytHeaders = mapOf(
         "User-Agent"      to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language" to "tr-TR,tr;q=0.9",
-        "Cookie"          to "CONSENT=YES+1; SOCS=CAI"
+        "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8",
+        "Cookie"          to "SOCS=CAI; CONSENT=YES+srp.gws-20210810-0-RC2.tr+FX+387; PREF=tz=Europe.Istanbul&f6=400&hl=tr&gl=TR"
     )
 
+    // Ana sayfada siyah ekran oluşmaması için garantili akış sağlayan Trend kategorileri
     override val mainPage = mainPageOf(
-        "${mainUrl}/" to "Önerilen"
+        "${mainUrl}/feed/trending?hl=tr&gl=TR" to "Trendler",
+        "${mainUrl}/feed/trending?bp=4gINGgt5dE11c2ljX2NoYW5uZWw%3D&hl=tr&gl=TR" to "Müzik",
+        "${mainUrl}/feed/trending?bp=4gIUR21hbGxfdHJlbmRpbmdfZ2FtZXM%3D&hl=tr&gl=TR" to "Oyun"
     )
 
-    // Tüm YouTube URL tiplerinden ve yalın string'lerden 11 haneli Video ID'yi çıkarır
     private fun extractVideoId(url: String): String? {
         val cleanUrl = url.trim()
         if (cleanUrl.length == 11 && !cleanUrl.contains("/")) return cleanUrl
-        
+
         val pattern = Regex("""(?:v=|youtu\.be/|shorts/|embed/|live/|/)([a-zA-Z0-9_-]{11})""")
         return pattern.find(cleanUrl)?.groupValues?.get(1)
     }
 
-    private fun String.extractJson(marker: String): JsonNode? {
-        val start = this.indexOf(marker)
-        if (start == -1) return null
-
-        val jsonStartIndex = this.indexOf('{', start + marker.length)
-        if (jsonStartIndex == -1) return null
-
-        return try {
-            val parser = mapper.factory.createParser(this.substring(jsonStartIndex))
-            parser.readValueAsTree<JsonNode>()
-        } catch (e: Exception) {
-            null
+    // Farklı ytInitialData tanımlamalarını esnek şekilde yakalar
+    private fun String.extractJson(vararg markers: String): JsonNode? {
+        for (marker in markers) {
+            val start = this.indexOf(marker)
+            if (start != -1) {
+                val jsonStartIndex = this.indexOf('{', start + marker.length)
+                if (jsonStartIndex != -1) {
+                    return try {
+                        val parser = mapper.factory.createParser(this.substring(jsonStartIndex))
+                        parser.readValueAsTree<JsonNode>()
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
         }
+        return null
     }
 
     private fun videoToSearchResponse(videoId: String, title: String): SearchResponse {
@@ -58,6 +64,7 @@ class YouTube : MainAPI() {
 
     private fun JsonNode.collectVideos(result: MutableList<SearchResponse>, seen: MutableSet<String>) {
         if (this.isObject) {
+            // Modern Lockup View Model
             if (this.path("contentType").asText() == "LOCKUP_CONTENT_TYPE_VIDEO") {
                 val videoId = this.path("contentId").asText("")
                 val title   = this.path("metadata").path("lockupMetadataViewModel").path("title").path("content").asText("")
@@ -70,10 +77,12 @@ class YouTube : MainAPI() {
             this.fields().forEach { (key, value) ->
                 when (key) {
                     "adSlotRenderer" -> Unit
-                    "videoRenderer", "compactVideoRenderer" -> {
+                    "videoRenderer", "compactVideoRenderer", "gridVideoRenderer", "reelItemRenderer" -> {
                         val videoId = value.path("videoId").asText("")
                         val title   = value.path("title").path("runs").path(0).path("text").asText(
-                            value.path("title").path("simpleText").asText("")
+                            value.path("title").path("simpleText").asText(
+                                value.path("headline").path("simpleText").asText("")
+                            )
                         )
 
                         if (videoId.isNotEmpty() && title.isNotEmpty() && seen.add(videoId)) {
@@ -89,7 +98,8 @@ class YouTube : MainAPI() {
     }
 
     private fun parseVideos(html: String): List<SearchResponse> {
-        val data   = html.extractJson("var ytInitialData =") ?: return emptyList()
+        val data = html.extractJson("var ytInitialData =", "window[\"ytInitialData\"] =", "ytInitialData =") 
+            ?: return emptyList()
         val result = mutableListOf<SearchResponse>()
         data.collectVideos(result, mutableSetOf())
 
@@ -97,8 +107,13 @@ class YouTube : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val html = app.get("${request.data}?hl=tr&gl=TR", headers = ytHeaders).text
-        val home = parseVideos(html)
+        val html = app.get(request.data, headers = ytHeaders).text
+        var home = parseVideos(html)
+
+        // YouTube ana sayfayı boş dönerse siyah ekran oluşmaması için arama yedeklemesi çalışır
+        if (home.isEmpty()) {
+            home = search("Türkiye Trend Videolar")
+        }
 
         return newHomePageResponse(request.name, home, false)
     }
@@ -115,13 +130,13 @@ class YouTube : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse {
-        val videoId = extractVideoId(url) 
+        val videoId = extractVideoId(url)
             ?: throw ErrorLoadingException("Geçersiz Video ID / URL: $url")
 
         val watchUrl = "${mainUrl}/watch?v=${videoId}"
         val html     = app.get("${watchUrl}&hl=tr&gl=TR", headers = ytHeaders).text
 
-        val player  = html.extractJson("var ytInitialPlayerResponse =")
+        val player  = html.extractJson("var ytInitialPlayerResponse =", "window[\"ytInitialPlayerResponse\"] =")
         val details = player?.path("videoDetails")
 
         val title = details?.path("title")?.asText("")?.takeIf { it.isNotBlank() }
@@ -135,7 +150,7 @@ class YouTube : MainAPI() {
         val author = details?.path("author")?.asText("") ?: ""
 
         val recommendations = mutableListOf<SearchResponse>()
-        html.extractJson("var ytInitialData =")?.collectVideos(recommendations, mutableSetOf(videoId))
+        html.extractJson("var ytInitialData =", "window[\"ytInitialData\"] =")?.collectVideos(recommendations, mutableSetOf(videoId))
 
         return newMovieLoadResponse(title, watchUrl, TvType.Others, videoId) {
             this.posterUrl       = "https://i.ytimg.com/vi/${videoId}/hqdefault.jpg"
@@ -154,11 +169,11 @@ class YouTube : MainAPI() {
         val videoId  = extractVideoId(data) ?: data
         val videoUrl = "${mainUrl}/watch?v=${videoId}"
 
-        // 1. CloudStream yerleşik Extractor'ı çağır
+        // 1. CloudStream yerleşik Extractor'ı dene
         val loaded = loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
         if (loaded) return true
 
-        // 2. Extractor başarısız olursa Invidious API üzerinden MP4 akışlarını çek
+        // 2. Extractor başarısız olursa Invidious API üzerinden stream linklerini al
         return try {
             val instances = listOf("https://invidious.nerdvpn.de", "https://inv.tux.im", "https://vid.puffyan.us")
             for (instance in instances) {
