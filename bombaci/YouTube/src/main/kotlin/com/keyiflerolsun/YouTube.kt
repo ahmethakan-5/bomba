@@ -26,7 +26,15 @@ class YouTube : MainAPI() {
         "${mainUrl}/" to "Önerilen"
     )
 
-    // ! JSON nesnesini sonundaki fazla karakterlerden etkilenmeden güvenle okur
+    // Tüm YouTube URL tiplerinden ve yalın string'lerden 11 haneli Video ID'yi çıkarır
+    private fun extractVideoId(url: String): String? {
+        val cleanUrl = url.trim()
+        if (cleanUrl.length == 11 && !cleanUrl.contains("/")) return cleanUrl
+        
+        val pattern = Regex("""(?:v=|youtu\.be/|shorts/|embed/|live/|/)([a-zA-Z0-9_-]{11})""")
+        return pattern.find(cleanUrl)?.groupValues?.get(1)
+    }
+
     private fun String.extractJson(marker: String): JsonNode? {
         val start = this.indexOf(marker)
         if (start == -1) return null
@@ -43,7 +51,7 @@ class YouTube : MainAPI() {
     }
 
     private fun videoToSearchResponse(videoId: String, title: String): SearchResponse {
-        return newMovieSearchResponse(title, videoId, TvType.Others) {
+        return newMovieSearchResponse(title, "${mainUrl}/watch?v=${videoId}", TvType.Others) {
             this.posterUrl = "https://i.ytimg.com/vi/${videoId}/hqdefault.jpg"
         }
     }
@@ -106,27 +114,31 @@ class YouTube : MainAPI() {
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
-    override suspend fun load(url: String): LoadResponse? {
-        val videoId = if (url.startsWith("http")) {
-            Regex("""(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})""").find(url)?.groupValues?.get(1) ?: return null
-        } else {
-            url
-        }
+    override suspend fun load(url: String): LoadResponse {
+        val videoId = extractVideoId(url) 
+            ?: throw ErrorLoadingException("Geçersiz Video ID / URL: $url")
 
-        val html = app.get("${mainUrl}/watch?v=${videoId}&hl=tr&gl=TR", headers = ytHeaders).text
+        val watchUrl = "${mainUrl}/watch?v=${videoId}"
+        val html     = app.get("${watchUrl}&hl=tr&gl=TR", headers = ytHeaders).text
 
         val player  = html.extractJson("var ytInitialPlayerResponse =")
         val details = player?.path("videoDetails")
 
-        val title       = details?.path("title")?.asText("")?.takeIf { it.isNotEmpty() } ?: "YouTube Video"
-        val description = details?.path("shortDescription")?.asText("") ?: ""
-        val author      = details?.path("author")?.asText("") ?: ""
+        val title = details?.path("title")?.asText("")?.takeIf { it.isNotBlank() }
+            ?: Regex("""<meta name="title" content="([^"]+)">""").find(html)?.groupValues?.get(1)
+            ?: "YouTube Video"
+
+        val description = details?.path("shortDescription")?.asText("")
+            ?: Regex("""<meta name="description" content="([^"]+)">""").find(html)?.groupValues?.get(1)
+            ?: ""
+
+        val author = details?.path("author")?.asText("") ?: ""
 
         val recommendations = mutableListOf<SearchResponse>()
         html.extractJson("var ytInitialData =")?.collectVideos(recommendations, mutableSetOf(videoId))
 
-        return newMovieLoadResponse(title, videoId, TvType.Others, videoId) {
-            this.posterUrl       = "https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg"
+        return newMovieLoadResponse(title, watchUrl, TvType.Others, videoId) {
+            this.posterUrl       = "https://i.ytimg.com/vi/${videoId}/hqdefault.jpg"
             this.plot            = description
             this.recommendations = recommendations
             if (author.isNotEmpty()) this.actors = listOf(ActorData(Actor(author)))
@@ -139,32 +151,35 @@ class YouTube : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val videoUrl = "https://www.youtube.com/watch?v=${data}"
+        val videoId  = extractVideoId(data) ?: data
+        val videoUrl = "${mainUrl}/watch?v=${videoId}"
 
-        // 1. Yerleşik CloudStream Extractor'ı dene
+        // 1. CloudStream yerleşik Extractor'ı çağır
         val loaded = loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
         if (loaded) return true
 
-        // 2. Yedek: Invidious API üzerinden stream linklerini al
+        // 2. Extractor başarısız olursa Invidious API üzerinden MP4 akışlarını çek
         return try {
-            val invidiousInstances = listOf("https://invidious.nerdvpn.de", "https://inv.tux.im", "https://vid.puffyan.us")
-            for (instance in invidiousInstances) {
-                val res = app.get("${instance}/api/v1/videos/${data}").text
-                val json = mapper.readTree(res)
+            val instances = listOf("https://invidious.nerdvpn.de", "https://inv.tux.im", "https://vid.puffyan.us")
+            for (instance in instances) {
+                val response = app.get("${instance}/api/v1/videos/${videoId}")
+                if (!response.isSuccessful) continue
+
+                val json = mapper.readTree(response.text)
                 val formatStreams = json.path("formatStreams")
 
                 if (formatStreams.isArray && formatStreams.size() > 0) {
                     formatStreams.forEach { stream ->
-                        val url     = stream.path("url").asText("")
-                        val quality = stream.path("qualityLabel").asText("720p")
+                        val streamUrl = stream.path("url").asText("")
+                        val quality   = stream.path("qualityLabel").asText("720p")
                         val container = stream.path("container").asText("mp4")
 
-                        if (url.isNotEmpty()) {
+                        if (streamUrl.isNotEmpty()) {
                             callback(
                                 ExtractorLink(
                                     source  = "Invidious",
                                     name    = "YouTube (${quality})",
-                                    url     = url,
+                                    url     = streamUrl,
                                     referer = "${instance}/",
                                     quality = getQualityFromName(quality),
                                     isM3u8  = container == "m3u8"
