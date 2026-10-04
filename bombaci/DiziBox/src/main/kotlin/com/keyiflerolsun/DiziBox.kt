@@ -143,7 +143,7 @@ class DiziBox : MainAPI() {
         val tags        = document.select("a[href*='/tur/']").map { it.text().trim() }
         val rating      = document.selectFirst("span.label-imdb b")?.text()?.trim()?.toRatingInt()
         val actors      = document.select("a[href*='/oyuncu/']").map { Actor(it.text().trim()) }
-        val trailer     = document.selectFirst("div.tv-overview iframe")?.attr("src")
+        val trailer     = fixUrlNull(document.selectFirst("div.tv-overview iframe")?.attr("src"))
 
         val episodeList = mutableListOf<Episode>()
 
@@ -203,25 +203,35 @@ class DiziBox : MainAPI() {
                 cookies     = defaultCookies,
                 interceptor = interceptor
             ).document
-            val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
+            val subFrame = fixUrlNull(subDoc.selectFirst("div#Player iframe")?.attr("src")) ?: return false
 
-            val iDoc          = app.get(subFrame, referer = "${mainUrl}/").text
-            val cryptData     = Regex("""CryptoJS\.AES\.decrypt\("(.*)","""").find(iDoc)?.groupValues?.get(1) ?: return false
-            val cryptPass     = Regex("""","(.*)"\);""").find(iDoc)?.groupValues?.get(1) ?: return false
+            val iDoc = app.get(subFrame, referer = "${mainUrl}/").text
+
+            // CryptoJS.AES.decrypt("CRYPT_DATA", "CRYPT_PASS")
+            val cryptoMatch = Regex("""CryptoJS\.AES\.decrypt\("([^"]+)"\s*,\s*"([^"]+)"\)""").find(iDoc)
+            val cryptData   = cryptoMatch?.groupValues?.get(1) ?: return false
+            val cryptPass   = cryptoMatch?.groupValues?.get(2) ?: return false
+
             val decryptedData = CryptoJS.decrypt(cryptPass, cryptData)
-            val decryptedDoc  = Jsoup.parse(decryptedData)
-            val vidUrl        = Regex("""file: '(.*)',""").find(decryptedDoc.html())?.groupValues?.get(1) ?: return false
+            val vidUrl        = Regex("""file:\s*['"]([^'"]+)['"]""").find(decryptedData)?.groupValues?.get(1) ?: return false
 
-            callback.invoke(
-                ExtractorLink(
-                    source  = this.name,
-                    name    = this.name,
-                    url     = vidUrl,
-                    referer = vidUrl,
-                    quality = getQualityFromName("4k"),
-                    isM3u8  = true
+            if (vidUrl.contains(".m3u8")) {
+                M3u8Helper.generateManifestUrl(
+                    this.name,
+                    vidUrl,
+                    referer = "${mainUrl}/"
+                ).forEach(callback)
+            } else {
+                callback.invoke(
+                    ExtractorLink(
+                        source  = this.name,
+                        name    = this.name,
+                        url     = vidUrl,
+                        referer = "${mainUrl}/",
+                        quality = getQualityFromName("1080p")
+                    )
                 )
-            )
+            }
 
         } else if (iframe.contains("/player/moly/moly.php")) {
             iframe = iframe.replace("moly.php?h=", "moly.php?wmode=opaque&h=")
@@ -239,7 +249,7 @@ class DiziBox : MainAPI() {
                 subDoc          = Jsoup.parse(strAtob)
             }
 
-            val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
+            val subFrame = fixUrlNull(subDoc.selectFirst("div#Player iframe")?.attr("src")) ?: return false
             loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
 
         } else if (iframe.contains("/player/haydi.php")) {
@@ -258,7 +268,7 @@ class DiziBox : MainAPI() {
                 subDoc          = Jsoup.parse(strAtob)
             }
 
-            val subFrame = subDoc.selectFirst("div#Player iframe")?.attr("src") ?: return false
+            val subFrame = fixUrlNull(subDoc.selectFirst("div#Player iframe")?.attr("src")) ?: return false
             loadExtractor(subFrame, "${mainUrl}/", subtitleCallback, callback)
         }
 
@@ -273,23 +283,24 @@ class DiziBox : MainAPI() {
             interceptor = interceptor
         ).document
 
-        var iframe = document.selectFirst("div#video-area iframe")?.attr("src") ?: return false
+        var iframe = fixUrlNull(document.selectFirst("div#video-area iframe")?.attr("src")) ?: return false
         Log.d("DZBX", "iframe » $iframe")
 
         iframeDecode(data, iframe, subtitleCallback, callback)
 
         document.select("div.video-toolbar option[value], div.video-toolbar select option").forEach {
-            val altLink = it.attr("value")
+            val altLink = fixUrlNull(it.attr("value")) ?: return@forEach
             if (altLink.isNotEmpty() && altLink.startsWith("http")) {
                 val subDoc = app.get(
                     altLink,
+                    referer     = data,
                     cookies     = defaultCookies,
                     interceptor = interceptor
                 ).document
-                iframe = subDoc.selectFirst("div#video-area iframe")?.attr("src") ?: return@forEach
+                iframe = fixUrlNull(subDoc.selectFirst("div#video-area iframe")?.attr("src")) ?: return@forEach
                 Log.d("DZBX", "alt iframe » $iframe")
 
-                iframeDecode(data, iframe, subtitleCallback, callback)
+                iframeDecode(altLink, iframe, subtitleCallback, callback)
             }
         }
 
