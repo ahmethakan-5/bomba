@@ -16,6 +16,12 @@ class CizgiMax : MainAPI() {
     override val hasQuickSearch       = true
     override val supportedTypes       = setOf(TvType.Cartoon, TvType.Anime)
 
+    private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    private val defaultHeaders = mapOf(
+        "User-Agent" to userAgent,
+        "Referer" to "$mainUrl/"
+    )
+
     override val mainPage = mainPageOf(
         "/yeni-eklenenler/"     to "Yeni Eklenenler",
         "/diziler/cizgi-film/"  to "Çizgi Filmler",
@@ -37,7 +43,7 @@ class CizgiMax : MainAPI() {
             "${mainUrl}${request.data}page/${page}/"
         }
 
-        val document = app.get(url).document
+        val document = app.get(url, headers = defaultHeaders).document
         val home     = document.select("div.film-list div.film-item, ul.filter-results li, div.poster-item, div.anime-card").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(request.name, home)
@@ -68,14 +74,14 @@ class CizgiMax : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("${mainUrl}/ara/?q=${query}").document
+        val document = app.get("${mainUrl}/ara/?q=${query}", headers = defaultHeaders).document
         val results = document.select("div.film-list div.film-item, ul.filter-results li, div.poster-item, div.anime-card").mapNotNull { it.toSearchResult() }
 
         if (results.isNotEmpty()) {
             return results
         }
 
-        val response = app.get("${mainUrl}/ajaxservice/index.php?qr=${query}").parsedSafe<AjaxSearchResponse>()?.data?.result ?: return listOf()
+        val response = app.get("${mainUrl}/ajaxservice/index.php?qr=${query}", headers = defaultHeaders).parsedSafe<AjaxSearchResponse>()?.data?.result ?: return listOf()
 
         return response.mapNotNull { result ->
             if (result.sName.contains(".Bölüm", true) || result.sName.contains("Sezon", true) || result.sName.contains("-izle")) {
@@ -95,7 +101,7 @@ class CizgiMax : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+        val document = app.get(url, headers = defaultHeaders).document
 
         val title       = document.selectFirst("h1.page-title, h1.entry-title, h1.film-title, h1")?.text()?.trim() ?: return null
         val poster      = fixUrlNull(
@@ -187,10 +193,17 @@ class CizgiMax : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("CZGM", "data » $data")
-        val response = app.get(data)
+        Log.d("CZGM", "loadLinks data » $data")
+        
+        val pageHeaders = mapOf(
+            "User-Agent" to userAgent,
+            "Referer" to "$mainUrl/"
+        )
+        val response = app.get(data, headers = pageHeaders)
         val document = response.document
         val rawHtml  = response.text
+
+        Log.d("CZGM", "Response Length » ${rawHtml.length}")
 
         val extractedUrls = mutableSetOf<String>()
 
@@ -200,11 +213,11 @@ class CizgiMax : MainAPI() {
             if (lower.endsWith(".css") || lower.endsWith(".png") || lower.endsWith(".jpg") || 
                 lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".svg") || 
                 lower.endsWith(".gif") || lower.endsWith(".ico") || lower.endsWith(".woff") || 
-                lower.endsWith(".woff2")) return false
+                lower.endsWith(".woff2") || lower.endsWith(".js")) return false
             if (lower.contains("google") || lower.contains("wargamings") || lower.contains("fontawesome") || 
                 lower.contains("swiper") || lower.contains("discord.com") || lower.contains("facebook.com") || 
                 lower.contains("twitter.com") || lower.contains("cloudflare") || lower.contains("yandex") ||
-                lower.contains("analytics") || lower.contains("disqus")) return false
+                lower.contains("analytics") || lower.contains("disqus") || lower.contains("googletagmanager")) return false
             return true
         }
 
@@ -219,7 +232,7 @@ class CizgiMax : MainAPI() {
                 cleanUrl = "https:$cleanUrl"
             }
 
-            if (cleanUrl.length == 24 && !cleanUrl.contains("/") && !cleanUrl.contains(".")) {
+            if (cleanUrl.length in 20..35 && !cleanUrl.contains("/") && !cleanUrl.contains(".")) {
                 cleanUrl = "https://tau-video.xyz/embed/$cleanUrl"
             }
 
@@ -230,10 +243,11 @@ class CizgiMax : MainAPI() {
             }
         }
 
-        // 1. DOM Üzerindeki Iframe'ler ve srcdoc İçeriği
-        document.select("iframe").forEach { iframe ->
+        // 1. Iframe Elementleri ve src/srcdoc/data attributes
+        document.select("iframe, embed, object").forEach { iframe ->
             addUrl(iframe.attr("src"))
             addUrl(iframe.attr("data-src"))
+            addUrl(iframe.attr("data-lazy-src"))
             addUrl(iframe.attr("data-frame"))
             
             val srcdoc = iframe.attr("srcdoc")
@@ -244,21 +258,54 @@ class CizgiMax : MainAPI() {
             }
         }
 
-        // 2. Video Attribute Taraması
-        document.select("[data-frame], [data-src], [data-embed], [data-video], [data-player], [data-url], [data-id]").forEach { element ->
-            listOf("data-frame", "data-src", "data-embed", "data-video", "data-player", "data-url", "data-id").forEach { attr ->
-                addUrl(element.attr(attr))
+        // 2. Player Alternatif Butonları (Dooplay / WP Ajax Player Numpost / Partlar)
+        document.select("[data-post], [data-id], [data-embed], [data-video], [data-player], [data-url], [data-link], [data-src], .player-option, .part-option").forEach { element ->
+            listOf("data-src", "data-embed", "data-video", "data-player", "data-url", "data-link", "value", "href").forEach { attr ->
+                val attrVal = element.attr(attr)
+                if (attrVal.isNotBlank() && (attrVal.contains("http") || attrVal.contains("//") || attrVal.contains("embed") || attrVal.contains("player"))) {
+                    addUrl(attrVal)
+                }
+            }
+
+            // WordPress AJAX Player sorgusu kontrolü
+            val postId = element.attr("data-post").ifEmpty { element.attr("data-id") }
+            val numpost = element.attr("data-numpost").ifEmpty { element.attr("data-opt") }
+            val type = element.attr("data-type").ifEmpty { "movie" }
+
+            if (postId.isNotBlank() && numpost.isNotBlank()) {
+                try {
+                    val ajaxHeaders = mapOf(
+                        "User-Agent" to userAgent,
+                        "X-Requested-With" to "XMLHttpRequest",
+                        "Referer" to data
+                    )
+                    val ajaxRes = app.post(
+                        "${mainUrl}/wp-admin/admin-ajax.php",
+                        headers = ajaxHeaders,
+                        data = mapOf(
+                            "action" to "oo_get_player",
+                            "id" to postId,
+                            "option" to numpost,
+                            "type" to type
+                        )
+                    ).text
+
+                    val embedUrl = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(ajaxRes)?.groupValues?.get(1)
+                        ?: Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).find(ajaxRes)?.value
+                    addUrl(embedUrl)
+                } catch (_: Exception) {}
             }
         }
 
-        // 3. Ham HTML İçindeki Oynatıcı/Embed Bağlantı Taraması
+        // 3. Genel Link Taraması (Tau-video, Sibnet, Vidmoly vb.)
         Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
             val url = match.value
             val lower = url.lowercase()
             if (lower.contains("tau-video") || lower.contains("sibnet") || lower.contains("vidmoly") || 
                 lower.contains("dood") || lower.contains("streamtape") || lower.contains("filemoon") || 
                 lower.contains("vudeo") || lower.contains("animecix") || lower.contains("vk.com") || 
-                lower.contains("ok.ru") || lower.contains(".m3u8") || lower.contains(".mp4")) {
+                lower.contains("ok.ru") || lower.contains("mail.ru") || lower.contains(".m3u8") || 
+                lower.contains(".mp4") || lower.contains("/embed/")) {
                 addUrl(url)
             }
         }
@@ -271,23 +318,26 @@ class CizgiMax : MainAPI() {
             }
         }
 
-        // 5. Base64 Kodlanmış Veriler
-        Regex("""["']([a-zA-Z0-9+/=]{30,})["']""").findAll(rawHtml).forEach { match ->
-            try {
-                val decoded = String(Base64.decode(match.groupValues[1], Base64.DEFAULT))
-                if (decoded.contains("http://") || decoded.contains("https://")) {
-                    Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(decoded).forEach { m ->
-                        addUrl(m.value)
-                    }
+        // 5. Script Tag İçerikleri & Base64 Kodlar
+        document.select("script").forEach { script ->
+            val html = script.html()
+            if (html.contains("atob(") || html.contains("base64")) {
+                Regex("""atob\(["']([a-zA-Z0-9+/=]+)["']\)""").findAll(html).forEach { match ->
+                    try {
+                        val decoded = String(Base64.decode(match.groupValues[1], Base64.DEFAULT))
+                        Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(decoded).forEach { m ->
+                            addUrl(m.value)
+                        }
+                    } catch (_: Exception) {}
                 }
-            } catch (_: Exception) {}
+            }
         }
 
-        Log.d("CZGM", "Found extracted URLs: $extractedUrls")
+        Log.d("CZGM", "Extracted Video URLs: $extractedUrls")
 
-        // 6. Bağlantıları Extractor'a Aktarma
+        // 6. Extractor Bağlantılarını Çalıştırma
         extractedUrls.forEach { videoUrl ->
-            Log.d("CZGM", "Loading extractor for URL » $videoUrl")
+            Log.d("CZGM", "Loading extractor for: $videoUrl")
             if (videoUrl.contains(".m3u8") || videoUrl.contains(".mp4")) {
                 callback(
                     ExtractorLink(
@@ -300,11 +350,11 @@ class CizgiMax : MainAPI() {
                     )
                 )
             } else {
-                loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
+                loadExtractor(videoUrl, "$mainUrl/", subtitleCallback, callback)
             }
         }
 
-        return true
+        return extractedUrls.isNotEmpty()
     }
 
     private data class AjaxSearchResponse(
