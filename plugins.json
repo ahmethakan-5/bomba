@@ -65,10 +65,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=cizgimax.online&sz=%size%",
-        "fileHash": "sha256-4f7619b75cca44e02ad8954b4e975635d59ac79df794390d4675c04cd835657d",
+        "fileHash": "sha256-e98cb31270cbd4fbe93e93933836c7b93144f50cd11ac25d41fda145b3cdda3f",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 23844,
+        "fileSize": 24259,
         "status": 1,
         "language": "tr",
         "authors": [
