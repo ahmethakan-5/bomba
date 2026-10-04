@@ -19,8 +19,8 @@ class DiziBox : MainAPI() { // MainUrlPlugin yerine MainAPI() olmalı
             null
         }
     }
-
-    override var interceptor: Interceptor? = Interceptor { chain ->
+    
+    var interceptor: Interceptor? = Interceptor { chain ->
         val killer = cloudflareKiller
         if (killer != null) {
             try {
