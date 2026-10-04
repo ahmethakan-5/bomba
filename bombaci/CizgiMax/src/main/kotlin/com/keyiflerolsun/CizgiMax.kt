@@ -18,7 +18,7 @@ class CizgiMax : MainAPI() {
     override var lang = "tr"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Anime)
 
-    // ... (getMainPage, search, load fonksiyonlarınız burada yer almalı)
+    // ... (getMainPage, search, load fonksiyonlarınız)
 
     override suspend fun loadLinks(
         data: String,
@@ -96,15 +96,15 @@ open class TauVideo : ExtractorApi() {
         response?.file?.let { videoUrl ->
             if (videoUrl.contains(".m3u8")) {
                 M3u8Helper.generateM3u8(
-                    name = name,
+                    source = name,
                     streamUrl = videoUrl,
                     referer = "$mainUrl/"
                 ).forEach(callback)
             } else {
                 callback(
                     ExtractorLink(
-                        name = name,
                         source = name,
+                        name = name,
                         url = videoUrl,
                         referer = "$mainUrl/",
                         quality = Qualities.Unknown.value
