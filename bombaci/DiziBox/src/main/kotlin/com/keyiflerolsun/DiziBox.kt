@@ -216,12 +216,13 @@ class DiziBox : MainAPI() {
             val vidUrl        = Regex("""file:\s*['"]([^'"]+)['"]""").find(decryptedData)?.groupValues?.get(1) ?: return false
 
             if (vidUrl.contains(".m3u8")) {
-                M3u8Helper.generateManifestUrl(
-                    this.name,
-                    vidUrl,
-                    referer = "${mainUrl}/"
+                M3u8Helper.generateM3u8(
+                    source    = this.name,
+                    streamUrl = vidUrl,
+                    referer   = "${mainUrl}/"
                 ).forEach(callback)
-            } else {
+            }
+            else {
                 callback.invoke(
                     ExtractorLink(
                         source  = this.name,
