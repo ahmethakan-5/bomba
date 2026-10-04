@@ -1,5 +1,3 @@
-// ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
-
 package com.keyiflerolsun
 
 import com.fasterxml.jackson.databind.JsonNode
@@ -18,8 +16,8 @@ class YouTube : MainAPI() {
 
     private val mapper = jacksonObjectMapper()
 
-    // * Türkçe sonuçlar + çerez onay ekranını atlamak için
     private val ytHeaders = mapOf(
+        "User-Agent"      to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language" to "tr-TR,tr;q=0.9",
         "Cookie"          to "CONSENT=YES+1; SOCS=CAI"
     )
@@ -28,28 +26,30 @@ class YouTube : MainAPI() {
         "${mainUrl}/" to "Önerilen"
     )
 
-    // ! Sayfa içindeki "var ytInitialData = {...};" JSON'unu ayıklar
+    // ! JSON nesnesini sonundaki fazla karakterlerden etkilenmeden güvenle okur
     private fun String.extractJson(marker: String): JsonNode? {
         val start = this.indexOf(marker)
         if (start == -1) return null
 
+        val jsonStartIndex = this.indexOf('{', start + marker.length)
+        if (jsonStartIndex == -1) return null
+
         return try {
-            mapper.readTree(this.substring(start + marker.length))
+            val parser = mapper.factory.createParser(this.substring(jsonStartIndex))
+            parser.readValueAsTree<JsonNode>()
         } catch (e: Exception) {
             null
         }
     }
 
     private fun videoToSearchResponse(videoId: String, title: String): SearchResponse {
-        return newMovieSearchResponse(title, "${mainUrl}/watch?v=${videoId}", TvType.Others) {
+        return newMovieSearchResponse(title, videoId, TvType.Others) {
             this.posterUrl = "https://i.ytimg.com/vi/${videoId}/hqdefault.jpg"
         }
     }
 
-    // ! ytInitialData içinde dolaşıp videoları toplar (ana sayfa, arama ve önerilenler için ortak)
     private fun JsonNode.collectVideos(result: MutableList<SearchResponse>, seen: MutableSet<String>) {
         if (this.isObject) {
-            // * 2025+ yeni görünüm: lockupViewModel
             if (this.path("contentType").asText() == "LOCKUP_CONTENT_TYPE_VIDEO") {
                 val videoId = this.path("contentId").asText("")
                 val title   = this.path("metadata").path("lockupMetadataViewModel").path("title").path("content").asText("")
@@ -61,8 +61,7 @@ class YouTube : MainAPI() {
 
             this.fields().forEach { (key, value) ->
                 when (key) {
-                    "adSlotRenderer"  -> Unit // ? Reklamları atla
-                    // * Eski görünüm: videoRenderer (arama sonuçlarında hâlâ olabilir)
+                    "adSlotRenderer" -> Unit
                     "videoRenderer", "compactVideoRenderer" -> {
                         val videoId = value.path("videoId").asText("")
                         val title   = value.path("title").path("runs").path(0).path("text").asText(
@@ -82,7 +81,7 @@ class YouTube : MainAPI() {
     }
 
     private fun parseVideos(html: String): List<SearchResponse> {
-        val data   = html.extractJson("var ytInitialData = ") ?: return emptyList()
+        val data   = html.extractJson("var ytInitialData =") ?: return emptyList()
         val result = mutableListOf<SearchResponse>()
         data.collectVideos(result, mutableSetOf())
 
@@ -93,13 +92,12 @@ class YouTube : MainAPI() {
         val html = app.get("${request.data}?hl=tr&gl=TR", headers = ytHeaders).text
         val home = parseVideos(html)
 
-        // ? Sonraki sayfalar innertube "continuation" ister, o yüzden yalnızca ilk sayfa
         return newHomePageResponse(request.name, home, false)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val html = app.get(
-            "${mainUrl}/results?search_query=${query.encodeUri()}&sp=EgIQAQ%253D%253D&hl=tr&gl=TR",
+            "${mainUrl}/results?search_query=${query.encodeUri()}&hl=tr&gl=TR",
             headers = ytHeaders
         ).text
 
@@ -109,20 +107,25 @@ class YouTube : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
-        val videoId = Regex("""(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})""").find(url)?.groupValues?.get(1) ?: return null
-        val html    = app.get("${mainUrl}/watch?v=${videoId}&hl=tr&gl=TR", headers = ytHeaders).text
+        val videoId = if (url.startsWith("http")) {
+            Regex("""(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})""").find(url)?.groupValues?.get(1) ?: return null
+        } else {
+            url
+        }
 
-        val player  = html.extractJson("var ytInitialPlayerResponse = ")
+        val html = app.get("${mainUrl}/watch?v=${videoId}&hl=tr&gl=TR", headers = ytHeaders).text
+
+        val player  = html.extractJson("var ytInitialPlayerResponse =")
         val details = player?.path("videoDetails")
 
-        val title       = details?.path("title")?.asText("")?.takeIf { it.isNotEmpty() } ?: return null
-        val description = details.path("shortDescription").asText("")
-        val author      = details.path("author").asText("")
+        val title       = details?.path("title")?.asText("")?.takeIf { it.isNotEmpty() } ?: "YouTube Video"
+        val description = details?.path("shortDescription")?.asText("") ?: ""
+        val author      = details?.path("author")?.asText("") ?: ""
 
         val recommendations = mutableListOf<SearchResponse>()
-        html.extractJson("var ytInitialData = ")?.collectVideos(recommendations, mutableSetOf(videoId))
+        html.extractJson("var ytInitialData =")?.collectVideos(recommendations, mutableSetOf(videoId))
 
-        return newMovieLoadResponse(title, "${mainUrl}/watch?v=${videoId}", TvType.Others, videoId) {
+        return newMovieLoadResponse(title, videoId, TvType.Others, videoId) {
             this.posterUrl       = "https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg"
             this.plot            = description
             this.recommendations = recommendations
@@ -130,10 +133,51 @@ class YouTube : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        // * CloudStream'in kendi YoutubeExtractor'ı watch bağlantısını işler
-        loadExtractor("https://www.youtube.com/watch?v=${data}", "${mainUrl}/", subtitleCallback, callback)
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val videoUrl = "https://www.youtube.com/watch?v=${data}"
 
-        return true
+        // 1. Yerleşik CloudStream Extractor'ı dene
+        val loaded = loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
+        if (loaded) return true
+
+        // 2. Yedek: Invidious API üzerinden stream linklerini al
+        return try {
+            val invidiousInstances = listOf("https://invidious.nerdvpn.de", "https://inv.tux.im", "https://vid.puffyan.us")
+            for (instance in invidiousInstances) {
+                val res = app.get("${instance}/api/v1/videos/${data}").text
+                val json = mapper.readTree(res)
+                val formatStreams = json.path("formatStreams")
+
+                if (formatStreams.isArray && formatStreams.size() > 0) {
+                    formatStreams.forEach { stream ->
+                        val url     = stream.path("url").asText("")
+                        val quality = stream.path("qualityLabel").asText("720p")
+                        val container = stream.path("container").asText("mp4")
+
+                        if (url.isNotEmpty()) {
+                            callback(
+                                ExtractorLink(
+                                    source  = "Invidious",
+                                    name    = "YouTube (${quality})",
+                                    url     = url,
+                                    referer = "${instance}/",
+                                    quality = getQualityFromName(quality),
+                                    isM3u8  = container == "m3u8"
+                                )
+                            )
+                        }
+                    }
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            false
+        }
     }
 }
