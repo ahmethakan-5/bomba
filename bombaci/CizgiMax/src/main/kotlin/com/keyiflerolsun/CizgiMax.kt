@@ -106,29 +106,40 @@ class CizgiMax : MainAPI() {
         val tags        = document.select("div.genre-item a, .genres a, .tags a, .film-genres a").mapNotNull { it.text().trim() }
         val rating      = document.selectFirst("div.color-imdb, .rating, .imdb-rating, .score")?.text()?.trim()?.toRatingInt()
 
-        val epElements = document.select("div.asisotope div.ajax_post")
-        val episodes = if (epElements.isNotEmpty()) {
-            epElements.mapNotNull {
-                val epName     = it.selectFirst("span.episode-names")?.text()?.trim() ?: return@mapNotNull null
-                val epHref     = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
+        val episodes = mutableListOf<Episode>()
+
+        // 1. Standart CizgiMax Bölüm Kutuları
+        val epElements = document.select("div.asisotope div.ajax_post, div.episodes-list a, div.bolumler a, ul.bolum-listesi a")
+        if (epElements.isNotEmpty()) {
+            epElements.forEach { element ->
+                val epName     = element.selectFirst("span.episode-names, a, .title")?.text()?.trim() ?: element.text().trim()
+                val epHref     = fixUrlNull(element.selectFirst("a")?.attr("href") ?: element.attr("href")) ?: return@forEach
                 val epEpisode  = Regex("""(\d+)\.\s*Bölüm""", RegexOption.IGNORE_CASE).find(epName)?.groupValues?.get(1)?.toIntOrNull()
-                val seasonName = it.selectFirst("span.season-name")?.text()?.trim() ?: ""
+                    ?: Regex("""(\d+)""", RegexOption.IGNORE_CASE).find(epName)?.groupValues?.get(1)?.toIntOrNull()
+                val seasonName = element.selectFirst("span.season-name")?.text()?.trim() ?: ""
                 val epSeason   = Regex("""(\d+)\.\s*Sezon""", RegexOption.IGNORE_CASE).find(seasonName)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
-                newEpisode(epHref) {
-                    this.name = epName
-                    this.season = epSeason
-                    this.episode = epEpisode
-                }
+                episodes.add(
+                    newEpisode(epHref) {
+                        this.name = if (epName.isNotBlank()) epName else "$epSeason. Sezon ${epEpisode ?: 1}. Bölüm"
+                        this.season = epSeason
+                        this.episode = epEpisode
+                    }
+                )
             }
-        } else {
-            val rawEpisodes = document.select("a[href*=-bolum], a[href*=-sezon], div.film-list a, .episode-list a, .dizi-bolumleri a, ul.bolumler a").mapNotNull { element ->
-                val epHref = fixUrlNull(element.attr("href")) ?: return@mapNotNull null
+        }
+
+        // 2. Yedek Taraması (Tüm Bölüm Linklerini Bulma)
+        if (episodes.isEmpty()) {
+            document.select("a[href]").forEach { element ->
+                val epHref = fixUrlNull(element.attr("href")) ?: return@forEach
                 val epText = element.text().trim().ifEmpty { element.attr("title").trim() }
 
-                if (!epHref.contains("-bolum") && !epHref.contains("-sezon") && !epHref.contains("-izle")) {
-                    return@mapNotNull null
-                }
+                if (epHref == url || epHref.contains("/diziler/") || epHref.contains("/tur/") || 
+                    epHref.contains("/yeni-eklenenler/") || epHref.contains("/ara/")) return@forEach
+
+                val isEpisodeLink = epHref.contains("-bolum") || epHref.contains("-sezon") || epHref.contains("-izle")
+                if (!isEpisodeLink) return@forEach
 
                 val epEpisode = Regex("""(\d+)[-.\s]*(?:bolum|bölüm)""", RegexOption.IGNORE_CASE).find(epHref)?.groupValues?.get(1)?.toIntOrNull()
                     ?: Regex("""(\d+)\.\s*Bölüm""", RegexOption.IGNORE_CASE).find(epText)?.groupValues?.get(1)?.toIntOrNull()
@@ -137,29 +148,32 @@ class CizgiMax : MainAPI() {
                 val epSeason = Regex("""(\d+)[-.\s]*(?:sezon)""", RegexOption.IGNORE_CASE).find(epHref)?.groupValues?.get(1)?.toIntOrNull()
                     ?: Regex("""(\d+)\.\s*Sezon""", RegexOption.IGNORE_CASE).find(epText)?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
-                if (epEpisode == null) return@mapNotNull null
-
-                newEpisode(epHref) {
-                    this.name = if (epText.isNotBlank()) epText else "$epSeason. Sezon $epEpisode. Bölüm"
-                    this.season = epSeason
-                    this.episode = epEpisode
-                }
-            }.distinctBy { it.data }
-
-            if (rawEpisodes.isEmpty()) {
-                listOf(
-                    newEpisode(url) {
-                        this.name = title
-                        this.season = 1
-                        this.episode = 1
+                episodes.add(
+                    newEpisode(epHref) {
+                        this.name = if (epText.isNotBlank()) epText else "$epSeason. Sezon ${epEpisode ?: 1}. Bölüm"
+                        this.season = epSeason
+                        this.episode = epEpisode
                     }
                 )
-            } else {
-                rawEpisodes
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.Cartoon, episodes) {
+        val finalEpisodes = episodes.distinctBy { it.data }
+
+        // 3. Tek Parça / Film Sayfası Fallback
+        val episodeList = if (finalEpisodes.isEmpty()) {
+            listOf(
+                newEpisode(url) {
+                    this.name = title
+                    this.season = 1
+                    this.episode = 1
+                }
+            )
+        } else {
+            finalEpisodes
+        }
+
+        return newTvSeriesLoadResponse(title, url, TvType.Cartoon, episodeList) {
             this.posterUrl = poster
             this.plot      = description
             this.tags      = tags
@@ -178,25 +192,28 @@ class CizgiMax : MainAPI() {
         val document = response.document
         val rawHtml  = response.text
 
-        val iframeUrls = mutableSetOf<String>()
+        val extractedUrls = mutableSetOf<String>()
 
         fun isValidVideoUrl(urlStr: String): Boolean {
             val lower = urlStr.lowercase()
-            if (urlStr == data || lower.contains("-izle") || lower.contains("/diziler/")) return false
+            if (urlStr == data) return false
             if (lower.endsWith(".css") || lower.endsWith(".png") || lower.endsWith(".jpg") || 
                 lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".svg") || 
-                lower.endsWith(".gif") || lower.endsWith(".ico") || lower.endsWith(".woff") || lower.endsWith(".woff2")) return false
-            if (lower.contains("google") || lower.contains("bunny.net") || lower.contains("fontawesome") || 
-                lower.contains("swiper") || lower.contains("discord.com") || lower.contains("youtube.com") || 
-                lower.contains("facebook.com") || lower.contains("twitter.com") || lower.contains("cloudflare") ||
-                lower.contains("wargamings.net") || lower.contains("reklam")) return false
-            if (lower.contains("/api/") || lower.contains("dosya secilmedi") || lower.contains("/ajaxservice/")) return false
+                lower.endsWith(".gif") || lower.endsWith(".ico") || lower.endsWith(".woff") || 
+                lower.endsWith(".woff2")) return false
+            if (lower.contains("google") || lower.contains("wargamings") || lower.contains("fontawesome") || 
+                lower.contains("swiper") || lower.contains("discord.com") || lower.contains("facebook.com") || 
+                lower.contains("twitter.com") || lower.contains("cloudflare") || lower.contains("yandex") ||
+                lower.contains("analytics") || lower.contains("disqus")) return false
             return true
         }
 
-        fun cleanAndAddUrl(urlStr: String?) {
+        fun addUrl(urlStr: String?) {
             if (urlStr.isNullOrBlank()) return
-            var cleanUrl = urlStr.trim().replace("\\/", "/")
+            var cleanUrl = urlStr.trim()
+                .replace("\\/", "/")
+                .replace("\\\"", "")
+                .replace("&amp;", "&")
 
             if (cleanUrl.startsWith("//")) {
                 cleanUrl = "https:$cleanUrl"
@@ -208,51 +225,83 @@ class CizgiMax : MainAPI() {
 
             fixUrlNull(cleanUrl)?.let { url ->
                 if (isValidVideoUrl(url)) {
-                    iframeUrls.add(url)
+                    extractedUrls.add(url)
                 }
             }
         }
 
-        // 1. Doğrudan Video/Player Adresi İçeren Embed Linklerini Yakala
-        Regex("""src=["']([^"']*(?:tau-video|animecix|sibnet|vidmoly|dood|streamtape|vudeo|ruframe|filemoon)[^"']*)["']""", RegexOption.IGNORE_CASE)
-            .findAll(rawHtml).forEach { match ->
-                cleanAndAddUrl(match.groupValues[1])
-            }
-
-        // 2. DOM Üzerindeki Gerçek Iframe ve Player Etiketleri
+        // 1. DOM Üzerindeki Iframe'ler ve srcdoc İçeriği
         document.select("iframe").forEach { iframe ->
-            cleanAndAddUrl(iframe.attr("src"))
-            cleanAndAddUrl(iframe.attr("data-src"))
-            cleanAndAddUrl(iframe.attr("data-frame"))
-        }
-
-        document.select("[data-frame], [data-src], [data-embed], [data-video], [data-player]").forEach { element ->
-            listOf("data-frame", "data-src", "data-embed", "data-video", "data-player").forEach { attr ->
-                cleanAndAddUrl(element.attr(attr))
+            addUrl(iframe.attr("src"))
+            addUrl(iframe.attr("data-src"))
+            addUrl(iframe.attr("data-frame"))
+            
+            val srcdoc = iframe.attr("srcdoc")
+            if (srcdoc.isNotBlank()) {
+                Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(srcdoc).forEach { match ->
+                    addUrl(match.value)
+                }
             }
         }
 
-        // 3. Tau Video Hash Taraması
-        Regex("""data-id=["']([a-zA-Z0-9_-]{20,32})["']""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
-            cleanAndAddUrl("https://tau-video.xyz/embed/${match.groupValues[1]}")
+        // 2. Video Attribute Taraması
+        document.select("[data-frame], [data-src], [data-embed], [data-video], [data-player], [data-url], [data-id]").forEach { element ->
+            listOf("data-frame", "data-src", "data-embed", "data-video", "data-player", "data-url", "data-id").forEach { attr ->
+                addUrl(element.attr(attr))
+            }
         }
 
-        // 4. Base64 Kodlanmış Video Linkleri
+        // 3. Ham HTML İçindeki Oynatıcı/Embed Bağlantı Taraması
+        Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(rawHtml).forEach { match ->
+            val url = match.value
+            val lower = url.lowercase()
+            if (lower.contains("tau-video") || lower.contains("sibnet") || lower.contains("vidmoly") || 
+                lower.contains("dood") || lower.contains("streamtape") || lower.contains("filemoon") || 
+                lower.contains("vudeo") || lower.contains("animecix") || lower.contains("vk.com") || 
+                lower.contains("ok.ru") || lower.contains(".m3u8") || lower.contains(".mp4")) {
+                addUrl(url)
+            }
+        }
+
+        // 4. Tau Video ID Taraması
+        Regex("""["']([a-zA-Z0-9_-]{20,32})["']""").findAll(rawHtml).forEach { match ->
+            val id = match.groupValues[1]
+            if (id.length == 24 || id.length == 32) {
+                addUrl("https://tau-video.xyz/embed/$id")
+            }
+        }
+
+        // 5. Base64 Kodlanmış Veriler
         Regex("""["']([a-zA-Z0-9+/=]{30,})["']""").findAll(rawHtml).forEach { match ->
             try {
                 val decoded = String(Base64.decode(match.groupValues[1], Base64.DEFAULT))
-                if (decoded.contains("http://") || decoded.contains("https://") || decoded.contains("tau-video")) {
-                    cleanAndAddUrl(decoded)
+                if (decoded.contains("http://") || decoded.contains("https://")) {
+                    Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE).findAll(decoded).forEach { m ->
+                        addUrl(m.value)
+                    }
                 }
             } catch (_: Exception) {}
         }
 
-        Log.d("CZGM", "Found iframe URLs: $iframeUrls")
+        Log.d("CZGM", "Found extracted URLs: $extractedUrls")
 
-        // 5. Bulunan Video Bağlantılarını Extractor'a Gönder
-        iframeUrls.forEach { iframe ->
-            Log.d("CZGM", "Loading extractor for iframe » $iframe")
-            loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
+        // 6. Bağlantıları Extractor'a Aktarma
+        extractedUrls.forEach { videoUrl ->
+            Log.d("CZGM", "Loading extractor for URL » $videoUrl")
+            if (videoUrl.contains(".m3u8") || videoUrl.contains(".mp4")) {
+                callback(
+                    ExtractorLink(
+                        name,
+                        name,
+                        videoUrl,
+                        mainUrl,
+                        Qualities.Unknown.value,
+                        isM3u8 = videoUrl.contains(".m3u8")
+                    )
+                )
+            } else {
+                loadExtractor(videoUrl, "${mainUrl}/", subtitleCallback, callback)
+            }
         }
 
         return true
