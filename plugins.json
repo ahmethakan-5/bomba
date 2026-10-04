@@ -585,10 +585,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=youtube.com&sz=%size%",
-        "fileHash": "sha256-904789459a9b25682a02e850e0632048198ebe5d0b9327ef0177a4b145b6c6fa",
+        "fileHash": "sha256-89fa25e2cf7fca111f5b04516b305aa5561cc97540a2ec707fa98ade75ac1611",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 11461,
+        "fileSize": 11924,
         "status": 1,
         "language": "tr",
         "authors": [
