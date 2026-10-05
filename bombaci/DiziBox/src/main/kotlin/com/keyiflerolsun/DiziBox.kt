@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.network.CloudflareKiller
 import okhttp3.Interceptor
 
 class DiziBox : MainAPI() { // MainUrlPlugin yerine MainAPI() olmalı
-    override var mainUrl = "https://www.dizibox.tv"
+    override var mainUrl = "https://www.dizibox.live"
     override var name = "DiziBox"
     override var hasMainPage = true
     override var lang = "tr"
