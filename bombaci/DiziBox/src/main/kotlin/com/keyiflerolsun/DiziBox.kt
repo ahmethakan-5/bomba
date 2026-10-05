@@ -65,14 +65,15 @@ class DiziBox : MainAPI() {
 
     // ---------- Arama (A-Z listesi üzerinden) ----------
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
-        return doc.select("ul.alphabetical-category-list li a")
-            .filter { it.text().contains(query, ignoreCase = true) }
-            .mapNotNull {
-                val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-                newTvSeriesSearchResponse(it.text().trim(), href, TvType.TvSeries)
-            }
-    }
+    val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
+    return doc.select("ul.alphabetical-category-list li a")
+        .toList()
+        .filter { it.text().contains(query, ignoreCase = true) }
+        .mapNotNull {
+            val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+            newTvSeriesSearchResponse(it.text().trim(), href, TvType.TvSeries)
+        }
+}
 
     // ---------- Dizi detayı ----------
     override suspend fun load(url: String): LoadResponse? {
