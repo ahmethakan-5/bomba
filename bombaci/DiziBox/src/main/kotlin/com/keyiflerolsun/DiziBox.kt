@@ -14,23 +14,22 @@ class DiziBox : MainAPI() {
     override var lang           = "tr"
     override val supportedTypes = setOf(TvType.TvSeries)
 
+    // CloudflareKiller tekil nesne olarak tanımlanmalı
     private val cloudflareKiller by lazy { CloudflareKiller() }
-    private val interceptor by lazy { CloudflareInterceptor(cloudflareKiller) }
-
-    class CloudflareInterceptor(private val killer: CloudflareKiller) : Interceptor {
-        override fun intercept(chain: Interceptor.Chain): Response {
-            val request  = chain.request()
-            val response = chain.proceed(request)
-            val body     = response.peekBody(1024 * 1024).string()
-
-            if (response.code == 403 || body.contains("Just a moment") || body.contains("cf-browser-verification")) {
-                return killer.intercept(chain)
-            }
-            return response
-        }
-    }
 
     private val cookies = mapOf("LockUser" to "true", "isTrustedUser" to "true")
+
+    // Interceptor mantığı sadeleştirildi ve crash riski azaltıldı
+    private val interceptor = Interceptor { chain ->
+        val request  = chain.request()
+        val response = chain.proceed(request)
+
+        if (response.code == 403 || response.code == 530) {
+            response.close()
+            return@Interceptor cloudflareKiller.intercept(chain)
+        }
+        response
+    }
 
     // ---------- Ana sayfa ----------
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -63,17 +62,16 @@ class DiziBox : MainAPI() {
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = poster }
     }
 
-    // ---------- Arama (A-Z listesi üzerinden) ----------
+    // ---------- Arama ----------
     override suspend fun search(query: String): List<SearchResponse> {
-    val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
-    return doc.select("ul.alphabetical-category-list li a")
-        .toList()
-        .filter { it.text().contains(query, ignoreCase = true) }
-        .mapNotNull {
-            val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-            newTvSeriesSearchResponse(it.text().trim(), href, TvType.TvSeries)
-        }
-}
+        val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
+        return doc.select("ul.alphabetical-category-list li a")
+            .filter { it.text().contains(query, ignoreCase = true) }
+            .mapNotNull {
+                val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+                newTvSeriesSearchResponse(it.text().trim(), href, TvType.TvSeries)
+            }
+    }
 
     // ---------- Dizi detayı ----------
     override suspend fun load(url: String): LoadResponse? {
@@ -99,7 +97,7 @@ class DiziBox : MainAPI() {
         }
     }
 
-    // ---------- Video linki (bakalim.py mantığı) ----------
+    // ---------- Video linki ----------
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -115,11 +113,11 @@ class DiziBox : MainAPI() {
 
         val html = app.get(iframe2, headers = mapOf("Referer" to "$mainUrl/"), interceptor = interceptor).text
 
-        val cryptData = Regex("CryptoJS\\.AES\\.decrypt\\(\"(.*?)\",\\s*\"").find(html)?.groupValues?.get(1) ?: return false
-        val cryptPass = Regex("\",\\s*\"(.*?)\"\\);").find(html)?.groupValues?.get(1) ?: return false
+        val cryptData = Regex("CryptoJS\\.AES\\.decrypt\\(\"(.*?)\",\\s*\"").find(html)?.groupValues?.getOrNull(1) ?: return false
+        val cryptPass = Regex("\",\\s*\"(.*?)\"\\);").find(html)?.groupValues?.getOrNull(1) ?: return false
 
         val decrypted = CryptoJS.decrypt(cryptPass, cryptData)
-        val m3u8      = Regex("file:\\s*'(.*?)'").find(decrypted)?.groupValues?.get(1) ?: return false
+        val m3u8      = Regex("file:\\s*'(.*?)'").find(decrypted)?.groupValues?.getOrNull(1) ?: return false
 
         callback(
             newExtractorLink(
