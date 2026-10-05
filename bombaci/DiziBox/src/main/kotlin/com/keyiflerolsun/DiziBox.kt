@@ -4,7 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import okhttp3.Interceptor
-import okhttp3.Response
 import org.jsoup.nodes.Element
 
 class DiziBox : MainAPI() {
@@ -14,12 +13,9 @@ class DiziBox : MainAPI() {
     override var lang           = "tr"
     override val supportedTypes = setOf(TvType.TvSeries)
 
-    // CloudflareKiller tekil nesne olarak tanımlanmalı
     private val cloudflareKiller by lazy { CloudflareKiller() }
-
     private val cookies = mapOf("LockUser" to "true", "isTrustedUser" to "true")
 
-    // Interceptor mantığı sadeleştirildi ve crash riski azaltıldı
     private val interceptor = Interceptor { chain ->
         val request  = chain.request()
         val response = chain.proceed(request)
@@ -31,17 +27,23 @@ class DiziBox : MainAPI() {
         response
     }
 
-    // ---------- Ana sayfa ----------
+    // ---------- Ana Sayfa ----------
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
 
         val lists = listOf(
-            HomePageList("Dikkat Çeken Yeni Diziler",
-                doc.select("section#new-series article.article-series-poster").mapNotNull { it.posterToResult() }),
-            HomePageList("Efsane Diziler",
-                doc.select("section#best-series article.article-series-small-grid").mapNotNull { it.smallGridToResult() }),
-            HomePageList("Önerilen Diziler",
-                doc.select("section#recommended-series article.article-series-small-grid").mapNotNull { it.smallGridToResult() })
+            HomePageList(
+                "Dikkat Çeken Yeni Diziler",
+                doc.select("section#new-series article.article-series-poster").mapNotNull { it.posterToResult() }
+            ),
+            HomePageList(
+                "Efsane Diziler",
+                doc.select("section#best-series article.article-series-small-grid").mapNotNull { it.smallGridToResult() }
+            ),
+            HomePageList(
+                "Önerilen Diziler",
+                doc.select("section#recommended-series article.article-series-small-grid").mapNotNull { it.smallGridToResult() }
+            )
         ).filter { it.list.isNotEmpty() }
 
         return newHomePageResponse(lists, false)
@@ -65,15 +67,20 @@ class DiziBox : MainAPI() {
     // ---------- Arama ----------
     override suspend fun search(query: String): List<SearchResponse> {
         val doc = app.get(mainUrl, interceptor = interceptor, cookies = cookies).document
+        
+        // Jsoup nesnesi yerine doğrudan Element listesi üzerinde Kotlin mapNotNull kullanımı:
         return doc.select("ul.alphabetical-category-list li a")
-            .filter { it.text().contains(query, ignoreCase = true) }
-            .mapNotNull {
-                val href = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
-                newTvSeriesSearchResponse(it.text().trim(), href, TvType.TvSeries)
+            .mapNotNull { element ->
+                val title = element.text().trim()
+                val href  = fixUrlNull(element.attr("href")) ?: return@mapNotNull null
+                
+                if (title.contains(query, ignoreCase = true)) {
+                    newTvSeriesSearchResponse(title, href, TvType.TvSeries)
+                } else null
             }
     }
 
-    // ---------- Dizi detayı ----------
+    // ---------- Dizi Detayı ----------
     override suspend fun load(url: String): LoadResponse? {
         val doc    = app.get(url, interceptor = interceptor, cookies = cookies).document
         val title  = doc.selectFirst("h1")?.text()?.removeSuffix(" izle")?.trim()
@@ -97,7 +104,7 @@ class DiziBox : MainAPI() {
         }
     }
 
-    // ---------- Video linki ----------
+    // ---------- Video Bağlantıları ----------
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
