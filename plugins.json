@@ -85,10 +85,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.dizibox.live&sz=%size%",
-        "fileHash": "sha256-ea5d2672d9f87625e4112d4c38d7e153d758f55358e4e710536266d8a89962cc",
+        "fileHash": "sha256-fe560dddef10af5c6af07d5fdc20dd146f9f93bc967a35faf807e79c7dcf1a43",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 15279,
+        "fileSize": 16139,
         "status": 1,
         "language": "tr",
         "authors": [
