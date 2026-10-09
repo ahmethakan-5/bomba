@@ -19,11 +19,10 @@ class DiziBox : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // WebView yerine doğrudan hafif HTTP isteği atıyoruz (Timeout ve Cloudflare engeli için)
         val document = app.get(request.data).document
 
-        // Sitedeki dizi/bölüm kartlarını yakalıyoruz
-        val home = document.select("article, div.post-item, a.poster, div.tv-series-card")
+        // HDFilmCehennemi mantığı: Sayfadaki tüm linkleri ve kart yapılarını daha esnek tarıyoruz
+        val home = document.select("article a, div.post-item a, div.tv-series-card a, a.poster, .episodes-list a")
             .mapNotNull { it.toSearchResult() }
             .distinctBy { it.url }
 
@@ -31,14 +30,22 @@ class DiziBox : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val titleElement = this.selectFirst("h2, h3, strong, .title")
-        val title = titleElement?.text()?.trim() ?: this.attr("title").takeIf { it.isNotBlank() } ?: return null
-        
-        val href = fixUrlNull(this.selectFirst("a")?.attr("href") ?: this.attr("href")) ?: return null
-        
-        val imgElement = this.selectFirst("img")
+        // HDFilmCehennemi'ndeki gibi başlık alternatifi arama
+        val title = this.selectFirst("h2, h3, h4, strong, .title")?.text()?.trim()
+            ?: this.attr("title").takeIf { it.isNotBlank() }
+            ?: this.selectFirst("img")?.attr("alt")?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val href = fixUrlNull(this.attr("href")) ?: return null
+
+        // Ana sayfadaki gereksiz/kategori linklerini eliyoruz
+        if (href == mainUrl || href.contains("/kategori/") || href.contains("/tag/")) return null
+
+        // Resim adresi tespiti (Base64 filtreli)
+        val imgElement = this.selectFirst("img") ?: this.parent()?.selectFirst("img")
         var posterUrl = imgElement?.attr("src")?.takeIf { !it.startsWith("data:") }
             ?: imgElement?.attr("data-src")?.takeIf { !it.startsWith("data:") }
+            ?: imgElement?.attr("data-lazy-src")?.takeIf { !it.startsWith("data:") }
         posterUrl = fixUrlNull(posterUrl)
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -52,19 +59,19 @@ class DiziBox : MainAPI() {
         val url = "${mainUrl}/?s=${query}"
         val document = app.get(url).document
 
-        return document.select("article, div.post-item").mapNotNull {
+        return document.select("article a, div.post-item a").mapNotNull {
             it.toSearchResult()
-        }
+        }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.poster img, img.thumb")?.attr("src"))
-        val description = document.selectFirst("div.description, div.entry-content")?.text()?.trim()
+        val poster = fixUrlNull(document.selectFirst("div.poster img, img.thumb, article img")?.attr("src"))
+        val description = document.selectFirst("div.description, div.entry-content, article p")?.text()?.trim()
 
-        val episodes = document.select("div.episodes-list a, ul.episodes a").mapNotNull {
+        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a").mapNotNull {
             val epName = it.text().trim()
             val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
 
