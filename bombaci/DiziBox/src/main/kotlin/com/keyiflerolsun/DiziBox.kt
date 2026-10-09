@@ -80,7 +80,7 @@ class DiziBox : MainAPI() {
         val seriesUrl = hit?.second ?: seriesUrlFromEpisode(epHref) ?: epHref
         val shownName = hit?.first ?: rawName.ifBlank { a.attr("title") }
         
-        val title = "$shownName $season$episode".replace(Regex("""\s+"""), " ").trim()
+        val title = "$shownName $season $episode".replace(Regex("""\s+"""), " ").trim()
         if (title.isBlank()) return null
         
         val poster = imgUrl()
@@ -100,4 +100,36 @@ class DiziBox : MainAPI() {
         // 1. Öne Çıkan / Beklenen Diziler (#recommended-series)
         val recItems = document.select("#recommended-series li, section.recommended li").mapNotNull { it.recommendedItem() }.distinctBy { it.url }
         if (recItems.isNotEmpty()) {
-            lists.add(HomePageList("Beklenen / Ek
+            lists.add(HomePageList("Beklenen / Eklenen Diziler", recItems))
+        }
+
+        // 2. Dikkat Çeken Yeni Diziler (#new-serieses)
+        val newItems = document.select("#new-serieses article, #new-series article, article.article-series-poster").mapNotNull { it.posterItem() }.distinctBy { it.url }
+        if (newItems.isNotEmpty()) {
+            lists.add(HomePageList("Dikkat Çeken Yeni Diziler", newItems))
+        }
+
+        // 3. Son Bölümler
+        val latestEpisodes = document.select("article.article-episode-card, .latest-episodes article")
+            .mapNotNull { it.episodeCardItem(byName) }
+            .distinctBy { it.url }
+        
+        if (latestEpisodes.isNotEmpty()) {
+            lists.add(HomePageList("Son Bölümler", latestEpisodes))
+        }
+
+        // 4. Fallback: İçerik bulunamazsa alfabetik listeden doldur
+        if (lists.isEmpty() && index.isNotEmpty()) {
+            val fallbackItems = index.take(20).map { item ->
+                newTvSeriesSearchResponse(item.first, item.second, TvType.TvSeries)
+            }
+            lists.add(HomePageList("Tüm Diziler", fallbackItems))
+        }
+
+        if (lists.isEmpty()) {
+            throw ErrorLoadingException("DiziBox ana sayfası okunamadı.")
+        }
+
+        return newHomePageResponse(lists, false)
+    }
+}
