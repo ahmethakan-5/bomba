@@ -1,6 +1,18 @@
-// ------------------------------------------------------------------
-    // Güncellenmiş Kart Yardımcıları
-    // ------------------------------------------------------------------
+package com.keyiflerolsun
+
+import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.ErrorLoadingException
+
+class DiziBox : MainAPI() {
+    override var mainUrl = "https://www.dizibox.tv"
+    override var name = "DiziBox"
+    override val hasMainPage = true
+    override var lang = "tr"
+    override val supportedTypes = setOf(TvType.TvSeries)
+
+    // --- YARDIMCI FONKSİYONLAR ---
     private fun Element.recommendedItem(): SearchResponse? {
         val a = selectFirst("a[href]") ?: return null
         val href = fixUrlNull(a.attr("href")) ?: return null
@@ -40,9 +52,7 @@
         return newTvSeriesSearchResponse(title, seriesUrl, TvType.TvSeries) { this.posterUrl = poster }
     }
 
-    // ------------------------------------------------------------------
-    // Güncellenmiş Ana Sayfa Fonksiyonu
-    // ------------------------------------------------------------------
+    // --- MAIN PAGE FONKSİYONU ---
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = getDoc(mainUrl)
 
@@ -73,13 +83,7 @@
             lists.add(HomePageList("Son Bölümler", latestEpisodes))
         }
 
-        // 4. Efsane Diziler (#best-series)
-        document.select("#best-series article, article.article-series-small-grid").mapNotNull { it.smallGridItem() }
-            .distinctBy { it.url }
-            .takeIf { it.isNotEmpty() }
-            ?.let { lists.add(HomePageList("Efsane Diziler", it)) }
-
-        // Eğer yukarıdakiler yine de boş dönerse (fallback), sayfadaki alfabetik listeden rastgele/ilk dizileri çek
+        // Fallback: Yukarıdakiler boş kalırsa alfabetik listeden doldur
         if (lists.isEmpty() && index.isNotEmpty()) {
             val fallbackItems = index.take(20).map { (title, url) ->
                 newTvSeriesSearchResponse(title, url, TvType.TvSeries)
@@ -88,8 +92,10 @@
         }
 
         if (lists.isEmpty()) {
-            throw ErrorLoadingException("DiziBox ana sayfası okunamadı (site yapısı değişmiş olabilir).")
+            throw ErrorLoadingException("DiziBox ana sayfası okunamadı.")
         }
 
         return newHomePageResponse(lists, false)
     }
+
+} // <--- Sınıf kapatma parantezi en sonda olmalı!
