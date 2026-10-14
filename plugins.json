@@ -414,6 +414,26 @@
         "name": "KultFilmler"
     },
     {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=nowtv.com.tr&sz=%size%",
+        "fileHash": "sha256-e7612c2564295ca5d36598234c1d4bed540b1055ff9cd1b09be7d323e1a3a4eb",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
+        "fileSize": 13426,
+        "status": 1,
+        "language": "tr",
+        "authors": [
+            "ahmethakan-5"
+        ],
+        "tvTypes": [
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "NowTV",
+        "description": "NOW TV dizi ve programlar\u0131",
+        "url": "https://raw.githubusercontent.com/ahmethakan-5/bomba/builds/NowTV.cs3",
+        "name": "NowTV"
+    },
+    {
         "iconUrl": "https://rectvapk.cc/wp-content/uploads/2023/02/Rec-TV.webp",
         "fileHash": "sha256-de51fff8c62ef19adb98c6156517cee60ae14124491e87fb9555efd03bc61b2d",
         "apiVersion": 1,
