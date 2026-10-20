@@ -415,10 +415,10 @@
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=nowtv.com.tr&sz=%size%",
-        "fileHash": "sha256-d92de590cb26e538583e2c838ff122b7fcdd7ed055d1392a680e39632b10b127",
+        "fileHash": "sha256-3335c70fa2d62f2c48a5e82b0892b45a5f14d9663728f05205dd46da3a537b9c",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 19272,
+        "fileSize": 21252,
         "status": 1,
         "language": "tr",
         "authors": [
