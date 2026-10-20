@@ -414,24 +414,22 @@
         "name": "KultFilmler"
     },
     {
-        "iconUrl": "https://www.google.com/s2/favicons?domain=nowtv.com.tr/&sz=%size%",
-        "fileHash": "sha256-b2a1ede410bd43db196b25c8e24a5b8eb63737141eb694c41e66631b59ec9eb6",
+        "iconUrl": "https://www.google.com/s2/favicons?domain=nowtv.com.tr&sz=%size%",
+        "fileHash": "sha256-d92de590cb26e538583e2c838ff122b7fcdd7ed055d1392a680e39632b10b127",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/ahmethakan-5/bomba",
-        "fileSize": 13468,
+        "fileSize": 19272,
         "status": 1,
         "language": "tr",
         "authors": [
-            "hexated",
-            "keyiflerolsun"
+            "ahmethakan-5"
         ],
         "tvTypes": [
-            "Movie",
             "TvSeries"
         ],
-        "version": 19,
+        "version": 1,
         "internalName": "NowTV",
-        "description": "T\u00fcrkiye'nin en h\u0131zl\u0131 hd film izleme sitesi",
+        "description": "NOW TV dizi ve programlar\u0131",
         "url": "https://raw.githubusercontent.com/ahmethakan-5/bomba/builds/NowTV.cs3",
         "name": "NowTV"
     },
