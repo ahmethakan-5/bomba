@@ -242,41 +242,84 @@ class NowTv : MainAPI() {
         }
 
         // ---- Bölümler
-        val html = getHtml(data, referer = "$mainUrl/") ?: return false
+        // Bölüm sayfasında video adresi yok. Sayfadaki oynatıcı, video_id ile
+        // POST /ajax/stream isteği atıp cevaptaki "video_url" alanını kullanıyor.
+        val page = try {
+            app.get(data, headers = baseHeaders, referer = "$mainUrl/", timeout = 30L)
+        } catch (e: Exception) {
+            Log.d(tag, "bölüm sayfası açılamadı: ${e.message}")
+            return false
+        }
+        val html = page.text
         var ok = false
 
-        // 1) Sayfa içinde doğrudan geçen m3u8 adresleri
-        val m3u8Links = extractM3u8(html)
-        Log.d(tag, "bölüm m3u8 sayısı = ${m3u8Links.size} ($data)")
-        for (link in m3u8Links) {
-            val generated = try {
-                M3u8Helper.generateM3u8(name, link, "$mainUrl/")
+        val videoId = Regex("""video_id\s*:\s*(\d+)""").find(html)?.groupValues?.get(1)
+            ?: Regex("""data-video-id=["'](\d+)["']""").find(html)?.groupValues?.get(1)
+            ?: Regex("""video_id=(\d+)""").find(html)?.groupValues?.get(1)
+        val csrf = Regex("""<meta name=["']csrf-token["'] content=["']([^"']+)["']""")
+            .find(html)?.groupValues?.get(1)
+        Log.d(tag, "video_id = $videoId, csrf var mı = ${csrf != null} ($data)")
+
+        if (videoId != null) {
+            val reqHeaders = baseHeaders + mapOf(
+                "Accept" to "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Origin" to mainUrl
+            ) + (if (csrf != null) mapOf("X-CSRF-TOKEN" to csrf) else emptyMap())
+
+            val streamText = try {
+                app.post(
+                    "$mainUrl/ajax/stream",
+                    data = mapOf("video_id" to videoId),
+                    headers = reqHeaders,
+                    referer = data,
+                    cookies = page.cookies,
+                    timeout = 30L
+                ).text
             } catch (e: Exception) {
-                Log.d(tag, "generateM3u8 hata: ${e.message}")
-                emptyList()
+                Log.d(tag, "ajax/stream hata: ${e.message}")
+                null
             }
-            if (generated.isNotEmpty()) {
-                generated.forEach(callback)
-            } else {
-                sendM3u8(name, link, "$mainUrl/", callback)
-            }
-            ok = true
-        }
-        if (ok) return true
+            Log.d(tag, "ajax/stream cevap: ${streamText?.take(400)}")
 
-        // 2) Doğrudan mp4
-        for (link in extractMp4(html)) {
-            callback(
-                newExtractorLink(name, name, link, ExtractorLinkType.VIDEO) {
-                    this.referer = "$mainUrl/"
-                    this.quality = Qualities.Unknown.value
+            if (streamText != null) {
+                val candidates = LinkedHashSet<String>()
+                Regex(""""video_url"\s*:\s*"([^"]+)"""").find(streamText)
+                    ?.groupValues?.get(1)?.let { candidates.add(cleanLink(it)) }
+                candidates.addAll(extractM3u8(streamText))
+                candidates.addAll(extractMp4(streamText))
+
+                for (link in candidates) {
+                    if (link.contains(".mp4", true) && !link.contains(".m3u8", true)) {
+                        callback(
+                            newExtractorLink(name, name, link, ExtractorLinkType.VIDEO) {
+                                this.referer = "$mainUrl/"
+                                this.quality = Qualities.Unknown.value
+                            }
+                        )
+                    } else {
+                        val generated = try {
+                            M3u8Helper.generateM3u8(name, link, "$mainUrl/")
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                        if (generated.isNotEmpty()) generated.forEach(callback)
+                        else sendM3u8(name, link, "$mainUrl/", callback)
+                    }
+                    ok = true
                 }
-            )
+            }
+        }
+        if (ok) return true
+
+        // Yedek 1) Sayfa içinde doğrudan geçen m3u8 adresleri
+        for (link in extractM3u8(html)) {
+            sendM3u8(name, link, "$mainUrl/", callback)
             ok = true
         }
         if (ok) return true
 
-        // 3) Gömülü iframe / extractor
+        // Yedek 2) Gömülü iframe / extractor
         Regex("""<iframe[^>]+src=["']([^"']+)["']""").findAll(html).forEach {
             if (loadExtractor(fixUrl(it.groupValues[1]), "$mainUrl/", subtitleCallback, callback)) ok = true
         }
