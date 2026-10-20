@@ -1,5 +1,6 @@
 package com.keyiflerolsun
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Document
@@ -12,22 +13,86 @@ class NowTv : MainAPI() {
     override val hasMainPage = true
     override var lang = "tr"
     override val hasQuickSearch = false
-    override val supportedTypes = setOf(TvType.TvSeries)
+    override val supportedTypes = setOf(TvType.TvSeries, TvType.Live)
 
     // data alanı sadece bölümü ayırt etmek için kullanılıyor, istek her zaman ana sayfaya yapılır
     override val mainPage = mainPageOf(
+        "canli" to "Canlı Yayın",
         "yeni" to "Yeni Bölümler",
         "diziler" to "Diziler",
         "programlar" to "Programlar"
     )
 
     private val trLocale = Locale("tr", "TR")
+    private val tag = "NowTv"
+
+    private val liveUrl get() = "$mainUrl/canli-yayin"
+    private val livePoster = "https://nqg6bkpsnhen.merlincdn.net/images/playerDefaultPoster.jpg"
+
+    private val userAgent =
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+    private val baseHeaders
+        get() = mapOf(
+            "User-Agent" to userAgent,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
+        )
+
+    // ---------------------------------------------------------------- Yardımcılar
+    // Varsayılan 10 sn zaman aşımı logcat'te "SocketTimeoutException" veriyordu.
+    // Süreyi uzatıp, hata olursa bir kez daha deniyoruz.
+    private suspend fun getHtml(url: String, referer: String = "$mainUrl/"): String? {
+        repeat(2) { attempt ->
+            try {
+                return app.get(url, headers = baseHeaders, referer = referer, timeout = 30L).text
+            } catch (e: Exception) {
+                Log.d(tag, "getHtml hata (deneme ${attempt + 1}) $url -> ${e.message}")
+            }
+        }
+        return null
+    }
+
+    private suspend fun getDocument(url: String): Document? =
+        getHtml(url)?.let { org.jsoup.Jsoup.parse(it, url) }
+
+    private fun cleanLink(raw: String): String =
+        raw.replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u002F", "/")
+            .replace("&amp;", "&")
+
+    // Sayfa kaynağındaki tüm m3u8 adreslerini (sırayı bozmadan) toplar
+    private fun extractM3u8(html: String): List<String> {
+        val found = LinkedHashSet<String>()
+        Regex("""https?:(?:\\?/){2}[^"'\s<>\\)]+?\.m3u8[^"'\s<>\\)]*""")
+            .findAll(html)
+            .forEach { found.add(cleanLink(it.value)) }
+        return found.toList()
+    }
+
+    private fun extractMp4(html: String): List<String> {
+        val found = LinkedHashSet<String>()
+        Regex("""https?:(?:\\?/){2}[^"'\s<>\\)]+?\.mp4[^"'\s<>\\)]*""")
+            .findAll(html)
+            .forEach { found.add(cleanLink(it.value)) }
+        return found.toList()
+    }
 
     // ---------------------------------------------------------------- Ana sayfa
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(request.name, emptyList(), false)
 
-        val document = app.get(mainUrl).document
+        // Canlı yayın: tek bir kart, istek gerekmez
+        if (request.data == "canli") {
+            val card = newLiveSearchResponse("NOW Canlı Yayın", liveUrl, TvType.Live) {
+                this.posterUrl = livePoster
+            }
+            return newHomePageResponse(request.name, listOf(card), false)
+        }
+
+        val document = getDocument(mainUrl) ?: return newHomePageResponse(request.name, emptyList(), false)
         val items = when (request.data) {
             "yeni" -> document.select("section.videos")
                 .firstOrNull { it.selectFirst("h2")?.text()?.contains("BÖLÜM", true) == true }
@@ -74,7 +139,7 @@ class NowTv : MainAPI() {
     // Sitedeki arama JS ile (harici bir API'den) çalışıyor; o adres elimizdeki HTML'de yok.
     // Bu yüzden ana sayfadaki tüm dizi/program posterleri içinde arıyoruz.
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get(mainUrl).document
+        val document = getDocument(mainUrl) ?: return emptyList()
         val q = query.lowercase(trLocale).trim()
         return document.select("div.poster")
             .mapNotNull { it.toSeriesCard() }
@@ -84,10 +149,19 @@ class NowTv : MainAPI() {
 
     // ---------------------------------------------------------------- Detay
     override suspend fun load(url: String): LoadResponse {
+        // Canlı yayın
+        if (url.contains("canli-yayin")) {
+            return newLiveStreamLoadResponse("NOW Canlı Yayın", liveUrl, liveUrl) {
+                this.posterUrl = livePoster
+                this.plot = "NOW kanalının kesintisiz canlı yayını"
+            }
+        }
+
         val seriesUrl = fixUrl(url).substringBefore("/bolum/").let {
             if (it.endsWith("/izle")) it else it.trimEnd('/') + "/izle"
         }
-        val document = app.get(seriesUrl).document
+        val document = getDocument(seriesUrl)
+            ?: throw ErrorLoadingException("Sayfa açılamadı: $seriesUrl")
 
         val title = document.selectFirst("meta[property=og:title]")?.attr("content")
             ?.substringBefore("|")?.trim()
@@ -129,28 +203,82 @@ class NowTv : MainAPI() {
     }
 
     // ---------------------------------------------------------------- Video
+    private suspend fun sendM3u8(
+        label: String,
+        link: String,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        callback(
+            newExtractorLink(name, label, link, ExtractorLinkType.M3U8) {
+                this.referer = referer
+                this.quality = Qualities.Unknown.value
+                this.headers = mapOf(
+                    "User-Agent" to userAgent,
+                    "Referer" to referer,
+                    "Origin" to mainUrl
+                )
+            }
+        )
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val html = app.get(data, referer = mainUrl).text
-        val found = HashSet<String>()
+        // ---- Canlı yayın: adres (token'lı) canlı yayın sayfasındaki oynatıcı ayarında geçiyor.
+        // Token süresi dolduğu için her seferinde sayfadan taze çekilir.
+        if (data.contains("canli-yayin")) {
+            val html = getHtml(liveUrl) ?: return false
+            val links = extractM3u8(html)
+            Log.d(tag, "canlı yayın m3u8 sayısı = ${links.size}")
+            links.forEachIndexed { i, link ->
+                val label = if (i == 0) "$name Canlı" else "$name Canlı (Alt ${i})"
+                sendM3u8(label, link, "$mainUrl/", callback)
+            }
+            return links.isNotEmpty()
+        }
+
+        // ---- Bölümler
+        val html = getHtml(data, referer = "$mainUrl/") ?: return false
+        var ok = false
 
         // 1) Sayfa içinde doğrudan geçen m3u8 adresleri
-        Regex("""https?:\\?/\\?/[^"'\s<>\\]+?\.m3u8[^"'\s<>\\]*""").findAll(html).forEach {
-            found.add(it.value.replace("\\/", "/"))
+        val m3u8Links = extractM3u8(html)
+        Log.d(tag, "bölüm m3u8 sayısı = ${m3u8Links.size} ($data)")
+        for (link in m3u8Links) {
+            val generated = try {
+                M3u8Helper.generateM3u8(name, link, "$mainUrl/")
+            } catch (e: Exception) {
+                Log.d(tag, "generateM3u8 hata: ${e.message}")
+                emptyList()
+            }
+            if (generated.isNotEmpty()) {
+                generated.forEach(callback)
+            } else {
+                sendM3u8(name, link, "$mainUrl/", callback)
+            }
+            ok = true
         }
-        found.forEach { link ->
-            M3u8Helper.generateM3u8(name, link, mainUrl).forEach(callback)
-        }
-        if (found.isNotEmpty()) return true
+        if (ok) return true
 
-        // 2) Gömülü iframe / extractor
-        var ok = false
+        // 2) Doğrudan mp4
+        for (link in extractMp4(html)) {
+            callback(
+                newExtractorLink(name, name, link, ExtractorLinkType.VIDEO) {
+                    this.referer = "$mainUrl/"
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+            ok = true
+        }
+        if (ok) return true
+
+        // 3) Gömülü iframe / extractor
         Regex("""<iframe[^>]+src=["']([^"']+)["']""").findAll(html).forEach {
-            if (loadExtractor(fixUrl(it.groupValues[1]), mainUrl, subtitleCallback, callback)) ok = true
+            if (loadExtractor(fixUrl(it.groupValues[1]), "$mainUrl/", subtitleCallback, callback)) ok = true
         }
         return ok
     }
