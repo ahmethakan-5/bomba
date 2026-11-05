@@ -20,8 +20,8 @@ class DiziBox : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
 
-        // DiziBox ana sayfasında içerikler "article.post-box" veya ".post-item" içinde yer alır
-        val home = document.select("article.post-box, article, div.post-item").mapNotNull { 
+        // Güncel site yapısına uygun seçiciler
+        val home = document.select("article, div.post-box, div.item, .col-box").mapNotNull { 
             it.toSearchResult() 
         }.distinctBy { it.url }
 
@@ -29,18 +29,15 @@ class DiziBox : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Başlığı 'entry-title', 'h2', 'h3' veya 'a' etiketinden alıyoruz
-        val titleElement = this.selectFirst(".entry-title, h2, h3, h4, .title")
+        val titleElement = this.selectFirst(".entry-title, h2, h3, h4, .title, .mh-posts-list-title")
         val title = titleElement?.text()?.trim() 
             ?: this.selectFirst("a")?.attr("title")?.takeIf { it.isNotBlank() }
             ?: return null
 
         val href = fixUrlNull(this.selectFirst("a")?.attr("href") ?: this.attr("href")) ?: return null
 
-        // Kategori/etiket/sayfalama linklerini filtreliyoruz
         if (href == mainUrl || href.contains("/kategori/") || href.contains("/tag/") || href.contains("/page/")) return null
 
-        // Görsel URL'sini alıyoruz (lazy-load attributes: data-src, data-lazy-src)
         val imgElement = this.selectFirst("img")
         var posterUrl = imgElement?.attr("data-src")?.takeIf { !it.startsWith("data:") }
             ?: imgElement?.attr("data-lazy-src")?.takeIf { !it.startsWith("data:") }
@@ -58,7 +55,7 @@ class DiziBox : MainAPI() {
         val url = "${mainUrl}/?s=${query}"
         val document = app.get(url).document
 
-        return document.select("article.post-box, article, div.post-item").mapNotNull {
+        return document.select("article, div.post-box, div.item, .col-box").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
     }
@@ -67,11 +64,11 @@ class DiziBox : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1.entry-title, h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.poster img, article img, .post-thumb img")?.attr("src") 
+        val poster = fixUrlNull(document.selectFirst("div.poster img, article img, .post-thumb img, .entry-content img")?.attr("src") 
             ?: document.selectFirst("article img")?.attr("data-src"))
         val description = document.selectFirst("div.description, div.entry-content, article p")?.text()?.trim()
 
-        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a, table.episodes a").mapNotNull {
+        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a, table.episodes a, .les-content a").mapNotNull {
             val epName = it.text().trim()
             val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
 
