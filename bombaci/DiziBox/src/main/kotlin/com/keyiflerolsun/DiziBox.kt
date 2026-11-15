@@ -20,7 +20,6 @@ class DiziBox : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
 
-        // Güncel site yapısına uygun seçiciler
         val home = document.select("article, div.post-box, div.item, .col-box").mapNotNull { 
             it.toSearchResult() 
         }.distinctBy { it.url }
@@ -64,23 +63,17 @@ class DiziBox : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1.entry-title, h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.poster img, article img, .post-thumb img, .entry-content img")?.attr("src") 
-            ?: document.selectFirst("article img")?.attr("data-src"))
-        val description = document.selectFirst("div.description, div.entry-content, article p")?.text()?.trim()
+        val poster = fixUrlNull(document.selectFirst("div.poster img, .post-thumb img, .entry-content img")?.attr("src") 
+            ?: document.selectFirst("img")?.attr("data-src"))
+        val description = document.selectFirst("div.description, .entry-content, p")?.text()?.trim()
 
-        // Bu sayfada bölüm listesi yok, sadece tek bir bölüm var.
-        // Dolayısıyla, `episodes` listesi boş olacak.
-        // Ancak, bu sayfada `iframe` varsa, o zaman doğrudan linki yüklüyoruz.
-
+        // Episod listesi yoksa, boş liste döner
         val episodes = mutableListOf<Episode>()
 
-        // Eğer sayfada `iframe` varsa, bu bir içerik sayfasıdır.
-        val iframes = document.select("iframe")
-        if (iframes.isNotEmpty()) {
-            // Bu durumda, bu sayfa bir bölüm sayfası değil, bir içerik sayfasıdır.
-            // Bu yüzden `episodes` boş olabilir, ama `loadLinks` çalışır.
-            // Ama burada `episodes` boş dönerse, bu hata vermez.
-            // Çünkü `loadLinks` doğrudan `iframe`'leri işler.
+        // Eğer sayfada bir bölüm varsa, onu ekleyebiliriz
+        val episodeTitle = document.selectFirst("h2, h3, .episode-title")?.text()?.trim()
+        if (episodeTitle != null) {
+            episodes.add(Episode(episodeTitle, url))
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -97,6 +90,10 @@ class DiziBox : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
         val iframes = document.select("iframe")
+
+        if (iframes.isEmpty()) {
+            return false
+        }
 
         iframes.forEach { iframe ->
             val src = fixUrlNull(iframe.attr("src") ?: iframe.attr("data-src"))
