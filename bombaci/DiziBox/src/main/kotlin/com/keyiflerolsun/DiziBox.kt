@@ -3,7 +3,6 @@ package com.keyiflerolsun
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.extractors.ExtractorLink
 
 class DiziBox : MainAPI() {
     override var mainUrl              = "https://www.dizibox.live"
@@ -68,7 +67,14 @@ class DiziBox : MainAPI() {
             ?: document.selectFirst("img")?.attr("data-src"))
         val description = document.selectFirst("div.description, .entry-content, p")?.text()?.trim()
 
-        val episodes = emptyList<Episode>() // Boş liste
+        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a, table.episodes a, .les-content a").mapNotNull {
+            val epName = it.text().trim()
+            val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+
+            newEpisode(epHref) {
+                this.name = epName
+            }
+        }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
@@ -92,15 +98,10 @@ class DiziBox : MainAPI() {
         iframes.forEach { iframe ->
             val src = fixUrlNull(iframe.attr("src") ?: iframe.attr("data-src"))
             if (!src.isNullOrBlank()) {
-                callback(ExtractorLink(src, name = "DiziBox", referer = data))
+                loadExtractor(src, data, subtitleCallback, callback)
             }
         }
 
         return true
     }
-}
-
-// Helper functions
-private fun fixUrlNull(url: String?): String? {
-    return url?.trim().takeIf { it.isNotBlank() }
 }
