@@ -3,6 +3,7 @@ package com.keyiflerolsun
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.extractors.ExtractorLink
 
 class DiziBox : MainAPI() {
     override var mainUrl              = "https://www.dizibox.live"
@@ -67,12 +68,7 @@ class DiziBox : MainAPI() {
             ?: document.selectFirst("img")?.attr("data-src"))
         val description = document.selectFirst("div.description, .entry-content, p")?.text()?.trim()
 
-        val episodes = mutableListOf<Episode>()
-
-        val episodeTitle = document.selectFirst("h2, h3, .episode-title")?.text()?.trim()
-        if (episodeTitle != null) {
-            episodes.add(Episode(episodeTitle, url))
-        }
+        val episodes = emptyList<Episode>() // Boş liste
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
