@@ -113,22 +113,35 @@ class FilmMakinesi : MainAPI() {
         Log.d("FLMM", "data » $data")
         val document = app.get(data, referer = "${mainUrl}/").document
 
-        val iframeElement = document.selectFirst("div.player-div iframe, div#player iframe, iframe[data-src], iframe[src]")
-        val rawIframe = iframeElement?.attr("data-src")?.takeIf { it.isNotBlank() }
-            ?: iframeElement?.attr("src")?.takeIf { it.isNotBlank() }
-            ?: run {
-                Log.w("FLMM", "iframe bulunamadı: $data")
-                return false
-            }
+        // Sunucu düğmeleri (DUAL Close / DUAL Rapid) ve JS ile yüklenen iframe'ler
+        val candidates = (
+            document.select("[data-video_url]").map { it.attr("data-video_url") } +
+            document.select("iframe[data-src], iframe[src]").map { it.attr("data-src").ifBlank { it.attr("src") } }
+        )
+            .map { fixUrl(it.trim()) }
+            .filter { it.startsWith("http") }
+            .distinct()
 
-        val iframe = fixUrl(rawIframe)
-        Log.d("FLMM", "iframe » $iframe")
-
-        val loaded = loadExtractor(iframe, "${mainUrl}/", subtitleCallback, callback)
-        if (!loaded) {
-            CloseLoad().getUrl(iframe, "${mainUrl}/", subtitleCallback, callback)
+        Log.d("FLMM", "sunucu adayları » $candidates")
+        if (candidates.isEmpty()) {
+            Log.w("FLMM", "Oynatıcı adresi bulunamadı: $data")
+            return false
         }
 
-        return true
+        var found = false
+        for (link in candidates) {
+            try {
+                if (link.contains("closeload")) {
+                    CloseLoad().getUrl(link, "${mainUrl}/", subtitleCallback, callback)
+                    found = true
+                } else {
+                    if (loadExtractor(link, "${mainUrl}/", subtitleCallback, callback)) found = true
+                }
+            } catch (e: Exception) {
+                Log.e("FLMM", "Sunucu hatası ($link): ${e.message}", e)
+            }
+        }
+
+        return found
     }
 }
