@@ -68,13 +68,19 @@ class DiziBox : MainAPI() {
             ?: document.selectFirst("article img")?.attr("data-src"))
         val description = document.selectFirst("div.description, div.entry-content, article p")?.text()?.trim()
 
-        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a, table.episodes a, .les-content a").mapNotNull {
-            val epName = it.text().trim()
-            val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+        // Bu sayfada bölüm listesi yok, sadece tek bir bölüm var.
+        // Dolayısıyla, `episodes` listesi boş olacak.
+        // Ancak, bu sayfada `iframe` varsa, o zaman doğrudan linki yüklüyoruz.
 
-            newEpisode(epHref) {
-                this.name = epName
-            }
+        val episodes = mutableListOf<Episode>()
+
+        // Eğer sayfada `iframe` varsa, bu bir içerik sayfasıdır.
+        val iframes = document.select("iframe")
+        if (iframes.isNotEmpty()) {
+            // Bu durumda, bu sayfa bir bölüm sayfası değil, bir içerik sayfasıdır.
+            // Bu yüzden `episodes` boş olabilir, ama `loadLinks` çalışır.
+            // Ama burada `episodes` boş dönerse, bu hata vermez.
+            // Çünkü `loadLinks` doğrudan `iframe`'leri işler.
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
