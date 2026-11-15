@@ -1,8 +1,11 @@
 package com.keyiflerolsun
 
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 
 class DiziBox : MainAPI() {
     override var mainUrl              = "https://www.dizibox.live"
@@ -14,73 +17,109 @@ class DiziBox : MainAPI() {
 
     override val mainPage = mainPageOf(
         mainUrl to "Son Eklenen Bölümler",
-        "${mainUrl}/dizi-izle/" to "Tüm Diziler"
+        "$mainUrl/tum-bolumler/" to "Tüm Bölümler"
     )
+
+    private val seasonEpisodeRegex = Regex("""(\d+)\s*\.\s*Sezon\s*(\d+)\s*\.\s*B""", RegexOption.IGNORE_CASE)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
 
-        // Güncel site yapısına uygun seçiciler
-        val home = document.select("article, div.post-box, div.item, .col-box").mapNotNull { 
-            it.toSearchResult() 
-        }.distinctBy { it.url }
+        val items = document.select("article, .col-box, .post-box, div.item, a[href]")
+            .mapNotNull { it.toSearchResult() }
+            .distinctBy { it.url }
 
-        return newHomePageResponse(request.name, home)
+        return newHomePageResponse(request.name, items, hasNext = false)
     }
 
+    /**
+     * Turns a listing element (or a bare <a>) into a result.
+     * Accepts both series links (/diziler/...) and episode links (...-bolum-izle/).
+     * Episode links are resolved to their series inside load().
+     */
     private fun Element.toSearchResult(): SearchResponse? {
-        val titleElement = this.selectFirst(".entry-title, h2, h3, h4, .title, .mh-posts-list-title")
-        val title = titleElement?.text()?.trim() 
-            ?: this.selectFirst("a")?.attr("title")?.takeIf { it.isNotBlank() }
-            ?: return null
+        val anchor = if (tagName() == "a") this else selectFirst("a[href]") ?: return null
+        val href = fixUrlNull(anchor.attr("href")) ?: return null
 
-        val href = fixUrlNull(this.selectFirst("a")?.attr("href") ?: this.attr("href")) ?: return null
+        val isSeries  = href.contains("/diziler/")
+        val isEpisode = href.contains("-bolum")
+        if (!isSeries && !isEpisode) return null
+        if (href == mainUrl || href.contains("/kategori/") || href.contains("/tag/") ||
+            href.contains("/page/") || href.contains("/tum-bolumler")) return null
 
-        if (href == mainUrl || href.contains("/kategori/") || href.contains("/tag/") || href.contains("/page/")) return null
+        val rawTitle = selectFirst(".entry-title, h2, h3, h4, .title, strong")?.text()
+            ?: anchor.attr("title")
+        val title = rawTitle.trim().removeSuffix(" izle").trim()
+        if (title.isBlank()) return null
 
-        val imgElement = this.selectFirst("img")
-        var posterUrl = imgElement?.attr("data-src")?.takeIf { !it.startsWith("data:") }
-            ?: imgElement?.attr("data-lazy-src")?.takeIf { !it.startsWith("data:") }
-            ?: imgElement?.attr("src")?.takeIf { !it.startsWith("data:") }
-        posterUrl = fixUrlNull(posterUrl)
+        val img = selectFirst("img")
+        val poster = listOf("data-src", "data-lazy-src", "src")
+            .firstNotNullOfOrNull { attr -> img?.attr(attr)?.takeIf { it.isNotBlank() && !it.startsWith("data:") } }
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-            this.posterUrl = posterUrl
+            this.posterUrl = fixUrlNull(poster)
         }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "${mainUrl}/?s=${query}"
-        val document = app.get(url).document
+        val encoded  = URLEncoder.encode(query, "UTF-8")
+        val document = app.get("$mainUrl/?s=$encoded").document
 
-        return document.select("article, div.post-box, div.item, .col-box").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
+        return document.select("article, .col-box, .post-box, div.item, a[href]")
+            .mapNotNull { it.toSearchResult() }
+            .distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+        val pageDoc = app.get(url).document
 
-        val title = document.selectFirst("h1.entry-title, h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.poster img, article img, .post-thumb img, .entry-content img")?.attr("src") 
-            ?: document.selectFirst("article img")?.attr("data-src"))
-        val description = document.selectFirst("div.description, div.entry-content, article p")?.text()?.trim()
+        // Episode pages carry a link to their series page (/diziler/<slug>/).
+        // Series pages are used directly.
+        val isEpisodePage = url.contains("-bolum")
+        val seriesUrl = if (isEpisodePage) {
+            fixUrlNull(pageDoc.selectFirst("a[href*=/diziler/]")?.attr("href")) ?: url
+        } else url
 
-        val episodes = document.select("div.episodes-list a, ul.episodes a, div.seasons-list a, table.episodes a, .les-content a").mapNotNull {
-            val epName = it.text().trim()
-            val epHref = fixUrlNull(it.attr("href")) ?: return@mapNotNull null
+        val seriesDoc = if (seriesUrl == url) pageDoc else app.get(seriesUrl).document
 
-            newEpisode(epHref) {
-                this.name = epName
-            }
-        }
+        val title = seriesDoc.selectFirst("h1")?.text()?.trim()
+            ?.removeSuffix(" izle")?.replace(seasonEpisodeRegex, "")?.trim()
+            ?.ifBlank { null }
+            ?: return null
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        val poster = fixUrlNull(seriesDoc.selectFirst("meta[property=og:image]")?.attr("content"))
+        val plot   = seriesDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
+
+        val episodes = extractEpisodes(seriesDoc, title).ifEmpty { extractEpisodes(pageDoc, title) }
+
+        return newTvSeriesLoadResponse(title, seriesUrl, TvType.TvSeries, episodes) {
             this.posterUrl = poster
-            this.plot = description
+            this.plot      = plot
         }
+    }
+
+    /**
+     * Collects episode links. Only keeps links whose label starts with the series title,
+     * so unrelated "related shows" links in the sidebar are ignored.
+     */
+    private fun extractEpisodes(doc: Document, seriesTitle: String): List<Episode> {
+        return doc.select("a[href*=-bolum]")
+            .mapNotNull { a ->
+                val href  = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
+                val label = a.attr("title").ifBlank { a.text() }.trim().removeSuffix(" izle").trim()
+                if (label.isBlank() || !label.startsWith(seriesTitle, ignoreCase = true)) return@mapNotNull null
+
+                val m = seasonEpisodeRegex.find(label)
+                newEpisode(href) {
+                    this.name    = label
+                    this.season  = m?.groupValues?.get(1)?.toIntOrNull()
+                    this.episode = m?.groupValues?.get(2)?.toIntOrNull()
+                }
+            }
+            .distinctBy { it.data }
+            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
     }
 
     override suspend fun loadLinks(
@@ -89,16 +128,54 @@ class DiziBox : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
-        val iframes = document.select("iframe")
+        val document = app.get(data, referer = mainUrl).document
 
-        iframes.forEach { iframe ->
-            val src = fixUrlNull(iframe.attr("src") ?: iframe.attr("data-src"))
-            if (!src.isNullOrBlank()) {
+        val sources = document.select("iframe").mapNotNull { iframe ->
+            iframe.absUrl("src").ifBlank { iframe.absUrl("data-src") }.takeIf { it.isNotBlank() }
+        }
+
+        for (src in sources) {
+            if (src.contains("/player/")) {
+                // Same-site player (e.g. /player/king/king.php). No external extractor handles it,
+                // so read the player page directly.
+                resolveSitePlayer(src, data, callback)
+            } else {
                 loadExtractor(src, data, subtitleCallback, callback)
             }
         }
 
-        return true
+        return sources.isNotEmpty()
+    }
+
+    private suspend fun resolveSitePlayer(
+        playerUrl: String,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val html = app.get(playerUrl, referer = referer).text
+            .replace("\\/", "/") // unescape JSON-style slashes
+
+        val m3u8 = Regex("""https?://[^"'\s<>]+?\.m3u8[^"'\s<>]*""").find(html)?.value
+        val mp4  = Regex("""https?://[^"'\s<>]+?\.mp4[^"'\s<>]*""").find(html)?.value
+
+        when {
+            m3u8 != null -> callback(
+                newExtractorLink(name, name, m3u8, ExtractorLinkType.M3U8) {
+                    this.referer = playerUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+            mp4 != null -> callback(
+                newExtractorLink(name, name, mp4, ExtractorLinkType.VIDEO) {
+                    this.referer = playerUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+            else -> {
+                // The player did not expose a plain stream URL. It may be encrypted or
+                // assembled in JS. Dump the response (Logcat tag below) so the format can be checked.
+                android.util.Log.w("DiziBox", "No plain stream found in player page: $playerUrl (len=${html.length})")
+            }
+        }
     }
 }
