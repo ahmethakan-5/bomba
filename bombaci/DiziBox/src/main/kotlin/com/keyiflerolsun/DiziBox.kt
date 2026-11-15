@@ -67,10 +67,8 @@ class DiziBox : MainAPI() {
             ?: document.selectFirst("img")?.attr("data-src"))
         val description = document.selectFirst("div.description, .entry-content, p")?.text()?.trim()
 
-        // Episod listesi yoksa, boş liste döner
         val episodes = mutableListOf<Episode>()
 
-        // Eğer sayfada bir bölüm varsa, onu ekleyebiliriz
         val episodeTitle = document.selectFirst("h2, h3, .episode-title")?.text()?.trim()
         if (episodeTitle != null) {
             episodes.add(Episode(episodeTitle, url))
@@ -98,10 +96,15 @@ class DiziBox : MainAPI() {
         iframes.forEach { iframe ->
             val src = fixUrlNull(iframe.attr("src") ?: iframe.attr("data-src"))
             if (!src.isNullOrBlank()) {
-                loadExtractor(src, data, subtitleCallback, callback)
+                callback(ExtractorLink(src, name = "DiziBox", referer = data))
             }
         }
 
         return true
     }
+}
+
+// Helper functions
+private fun fixUrlNull(url: String?): String? {
+    return url?.trim().takeIf { it.isNotBlank() }
 }
